@@ -1,8 +1,7 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
-
-const socketUrl = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+import { API_BASE_URL as socketUrl } from '../config/api.js';
 
 const SocketContext = createContext(null);
 

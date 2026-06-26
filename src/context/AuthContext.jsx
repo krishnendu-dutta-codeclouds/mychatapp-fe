@@ -1,8 +1,7 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import { signInWithPopup } from 'firebase/auth';
 import { auth, googleProvider } from '../config/firebase.js';
-
-const apiBase = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+import { API_BASE_URL as apiBase } from '../config/api.js';
 
 const AuthContext = createContext(null);
 
