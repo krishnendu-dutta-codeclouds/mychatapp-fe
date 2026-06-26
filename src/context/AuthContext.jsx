@@ -179,6 +179,9 @@ export function AuthProvider({ children }) {
       idToken = 'mock_google_id_token';
       isMockUsed = true;
     } else {
+      if (!auth || !googleProvider) {
+        throw new Error('Google Authentication is not configured or failed to initialize.');
+      }
       // 1. Trigger Google login popup via Firebase Client SDK
       const userCredential = await signInWithPopup(auth, googleProvider);
       
@@ -197,7 +200,7 @@ export function AuthProvider({ children }) {
     try {
       data = await handleResponse(response);
     } catch (err) {
-      if (!isMockUsed) {
+      if (!isMockUsed && auth) {
         try {
           await auth.signOut();
         } catch (signOutErr) {
@@ -300,7 +303,9 @@ export function AuthProvider({ children }) {
   const logout = async () => {
     try {
       // Sign out from Firebase Client SDK to clear Google OAuth session state
-      await auth.signOut();
+      if (auth) {
+        await auth.signOut();
+      }
     } catch (firebaseErr) {
       console.error('Error signing out of Firebase SDK:', firebaseErr);
     }
