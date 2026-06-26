@@ -1,0 +1,156 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Premium Light Theme Colors (Inverted Zinc Palette in RGB format) */
+  --zinc-50: 9 9 11;       /* darkest charcoal text */
+  --zinc-100: 24 24 27;    /* dark text */
+  --zinc-200: 39 39 42;    /* primary body text */
+  --zinc-300: 63 63 70;    /* secondary text */
+  --zinc-400: 82 82 91;    /* muted text */
+  --zinc-500: 113 113 122; /* gray text */
+  --zinc-600: 161 161 170; /* borders / disabled elements */
+  --zinc-700: 212 212 216; /* light panel borders */
+  --zinc-850: 228 228 231;
+  --zinc-800: 228 228 231; /* secondary light panel background */
+  --zinc-900: 244 244 245; /* light sidebar background */
+  --zinc-950: 255 255 255; /* light primary window background */
+  
+  --color-white: 24 24 27;  /* dark charcoal in light mode */
+}
+
+.dark {
+  /* Premium Dark Theme Colors (Standard Zinc Palette in RGB format) */
+  --zinc-50: 250 250 250;
+  --zinc-100: 244 244 245;
+  --zinc-200: 228 228 231;
+  --zinc-300: 212 212 216;
+  --zinc-400: 161 161 170;
+  --zinc-500: 113 113 122;
+  --zinc-600: 82 82 91;
+  --zinc-700: 63 63 70;
+  --zinc-850: 39 39 42;
+  --zinc-800: 39 39 42;
+  --zinc-900: 24 24 27;
+  --zinc-950: 9 9 11;
+  
+  --color-white: 255 255 255; /* pure white in dark mode */
+}
+
+/* Core Premium Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(120, 120, 120, 0.25);
+  border-radius: 9999px;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(120, 120, 120, 0.4);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Glassmorphism Utilities */
+.glass {
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.dark .glass {
+  background: rgba(24, 24, 27, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.glass-light {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+/* Custom Chat Background Parallax Grid */
+.chat-bg {
+  background-color: var(--zinc-950);
+  background-image: 
+    radial-gradient(at 20% 20%, rgba(16, 185, 129, 0.02) 0px, transparent 50%),
+    radial-gradient(at 80% 40%, rgba(59, 130, 246, 0.01) 0px, transparent 50%),
+    radial-gradient(at 40% 80%, rgba(139, 92, 246, 0.02) 0px, transparent 50%);
+  position: relative;
+}
+
+.chat-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.06;
+  background-image: radial-gradient(var(--zinc-300) 1px, transparent 1px);
+  background-size: 24px 24px;
+  pointer-events: none;
+}
+
+.dark .chat-bg::before {
+  opacity: 0.15;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.15) 1px, transparent 1px);
+}
+
+/* Custom Message Bubble Tail/Shape */
+.bubble-in {
+  border-top-left-radius: 4px;
+}
+
+.bubble-out {
+  border-top-right-radius: 4px;
+}
+
+/* Bouncing Typing Dot Animations */
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.typing-dot {
+  animation: bounce 1s infinite ease-in-out;
+}
+
+.typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* Page loading pulse */
+.loader-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: .3;
+  }
+}
