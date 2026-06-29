@@ -23,7 +23,8 @@ function Sidebar() {
   const { 
     user, logout, updateProfile, apiFetch, setIsAdminPortalOpen, 
     updateSecuritySettings, theme, toggleTheme, deleteAccount, handleResponse,
-    themeColor, fontSize, updateAppearance, getAvatarUrl, chatBgPattern
+    themeColor, fontSize, updateAppearance, getAvatarUrl, chatBgPattern,
+    apiBase, isLocalBackend, accessToken
   } = useAuth();
   const { 
     friends, groups, activeChat, selectChat, stories, postStory, viewStory,
@@ -110,30 +111,70 @@ function Sidebar() {
       return;
     }
 
-    const timer = setTimeout(async () => {
+    let cancelled = false;
+
+    const runSearch = async () => {
       setGlobalSidebarLoading(true);
       try {
-        const response = await apiFetch(`/api/users/search?query=${encodeURIComponent(searchQuery.trim())}`);
-        if (response.ok) {
-          const data = await handleResponse(response);
-          // Filter out ourselves and existing accepted friends
-          const filtered = data.filter(u => {
-            if (u.id === user.id) return false;
-            const localFriend = friends.find(f => f.id === u.id);
-            if (localFriend && localFriend.friendshipStatus === 'accepted') return false;
-            return true;
-          });
-          setGlobalSidebarResults(filtered);
+        // Primary backend (whichever was resolved: local if up, else online)
+        const primaryRes = await apiFetch(`/api/users/search?query=${encodeURIComponent(searchQuery.trim())}`);
+        const primaryData = primaryRes.ok ? await handleResponse(primaryRes) : [];
+
+        // Secondary backend: if the user is currently on the LIVE backend, also
+        // try the LOCAL backend (and vice-versa) so they can find users that
+        // were originally registered on the other deployment. We only do this
+        // when there are too few results on the primary to avoid wasted calls.
+        let mergedData = primaryData;
+        if (Array.isArray(primaryData) && primaryData.length < 5) {
+          const alternateBase = isLocalBackend
+            ? (import.meta.env.VITE_ONLINE_API_URL || 'https://mychatapp-be-z1nx.onrender.com').replace(/\/+$/, '')
+            : 'http://localhost:5001';
+          try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 3000);
+            const altRes = await fetch(`${alternateBase}/api/users/search?query=${encodeURIComponent(searchQuery.trim())}`, {
+              method: 'GET',
+              signal: controller.signal,
+              headers: { 'Authorization': `Bearer ${accessToken || ''}` },
+              mode: 'cors'
+            });
+            clearTimeout(timer);
+            if (altRes.ok) {
+              const altData = await altRes.json();
+              if (Array.isArray(altData)) {
+                const seen = new Set(primaryData.map(u => u.id));
+                for (const u of altData) {
+                  if (!seen.has(u.id) && u.id !== user.id) mergedData.push(u);
+                }
+              }
+            }
+          } catch (_) {
+            // Alternate backend is simply unreachable — ignore
+          }
         }
+
+        if (cancelled) return;
+        // Filter out ourselves and existing accepted friends
+        const filtered = mergedData.filter(u => {
+          if (u.id === user.id) return false;
+          const localFriend = friends.find(f => f.id === u.id);
+          if (localFriend && localFriend.friendshipStatus === 'accepted') return false;
+          return true;
+        });
+        setGlobalSidebarResults(filtered);
       } catch (err) {
         console.error('Failed to search global users in sidebar:', err);
       } finally {
-        setGlobalSidebarLoading(false);
+        if (!cancelled) setGlobalSidebarLoading(false);
       }
-    }, 400);
+    };
 
-    return () => clearTimeout(timer);
-  }, [searchQuery, friends, user, apiFetch, handleResponse]);
+    const timer = setTimeout(runSearch, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchQuery, friends, user, apiFetch, handleResponse, accessToken, isLocalBackend]);
 
   const sendSidebarRequest = async (friendId) => {
     try {
@@ -435,7 +476,8 @@ function Sidebar() {
           <div>
             <h1 className="text-sm font-semibold text-white leading-tight">{user?.displayName}</h1>
             <span className="text-[11px] text-zinc-400 flex items-center gap-1">
-              <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full"></span> Active Session
+              <span className={`h-1.5 w-1.5 rounded-full ${isLocalBackend ? 'bg-sky-500 animate-pulse' : 'bg-emerald-500'}`}></span>
+              {isLocalBackend ? 'Local Backend' : 'Online Backend'}
             </span>
           </div>
         </div>

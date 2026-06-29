@@ -11,8 +11,11 @@ export function SocketProvider({ children }) {
   const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
 
+  // Wait for both `accessToken` and a resolved `apiBase` to be available
+  // so the Socket.IO gateway targets the backend we just selected
+  // (local if reachable, otherwise online).
   useEffect(() => {
-    if (loading || !accessToken) {
+    if (loading || !apiBase || !accessToken) {
       if (socket) {
         socket.disconnect();
         setSocket(null);
@@ -22,7 +25,7 @@ export function SocketProvider({ children }) {
     }
 
     // Connect to Socket.IO using dynamically resolved absolute URL
-    const newSocket = io(apiBase || undefined, {
+    const newSocket = io(apiBase, {
       auth: {
         token: accessToken
       },
