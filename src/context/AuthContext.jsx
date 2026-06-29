@@ -3,7 +3,7 @@ import { signInWithPopup } from 'firebase/auth';
 import { auth, googleProvider, hasValidConfig } from '../config/firebase.js';
 import { Browser } from '@capacitor/browser';
 
-const onlineApiFallback = (import.meta.env.VITE_API_URL || 'https://chatapp-be-3nou.onrender.com').replace(/\/+$/, '');
+const onlineApiFallback = (import.meta.env.VITE_API_URL || 'https://mychatapp-be-z1nx.onrender.com').replace(/\/+$/, '');
 
 const AuthContext = createContext(null);
 
