@@ -6,20 +6,11 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://chatapp-be-3nou.onrender.com/api/:path*"
+      "destination": "https://mychatapp-be-z1nx.onrender.com/api/:path*"
     },
     {
-      "source": "/((?!assets/).*)",
-      "destination": "/index.html"
-    }
-  ],
-  "headers": [
-    {
-      "source": "/(.*)",
-      "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options", "value": "DENY" }
-      ]
+      "source": "/socket.io/:path*",
+      "destination": "https://mychatapp-be-z1nx.onrender.com/socket.io/:path*"
     }
   ]
 }

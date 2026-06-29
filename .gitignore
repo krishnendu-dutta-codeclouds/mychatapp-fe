@@ -24,6 +24,7 @@ build/
 .env.test.local
 *.pem
 *.key
+vercel.json
 
 # =========================================================================
 # Local Media Uploads (if any)
