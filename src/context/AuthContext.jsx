@@ -1,18 +1,224 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import { signInWithPopup } from 'firebase/auth';
-import { auth, googleProvider } from '../config/firebase.js';
-import { API_BASE_URL as apiBase } from '../config/api.js';
+import { auth, googleProvider, hasValidConfig } from '../config/firebase.js';
+import { Browser } from '@capacitor/browser';
+
+const onlineApiFallback = (import.meta.env.VITE_API_URL || 'https://chatapp-be-3nou.onrender.com').replace(/\/+$/, '');
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [accessToken, setAccessToken] = useState(null);
+  const [user, setUser] = useState(() => {
+    try {
+      const savedUser = localStorage.getItem('user');
+      return savedUser ? JSON.parse(savedUser) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+  const [accessToken, setAccessToken] = useState(() => {
+    try {
+      return localStorage.getItem('accessToken') || null;
+    } catch (e) {
+      return null;
+    }
+  });
   const [loading, setLoading] = useState(true);
+  const [apiBase, setApiBase] = useState(() => {
+    return (import.meta.env.VITE_API_URL || 'http://localhost:5001').replace(/\/+$/, '');
+  });
   const [isAdminPortalOpen, setIsAdminPortalOpen] = useState(false);
 
   // Theme management (light/dark mode)
-  const [theme, setTheme] = useState('dark');
+  const [theme, setTheme] = useState(() => {
+    try {
+      const savedUser = localStorage.getItem('user');
+      if (savedUser) {
+        const parsed = JSON.parse(savedUser);
+        if (parsed) {
+          if (parsed.theme) return parsed.theme;
+          if (parsed.email) {
+            const savedEmailTheme = localStorage.getItem(`theme-${parsed.email}`);
+            if (savedEmailTheme) return savedEmailTheme;
+          }
+          if (parsed.id) {
+            const savedIdTheme = localStorage.getItem(`theme-${parsed.id}`);
+            if (savedIdTheme) return savedIdTheme;
+          }
+        }
+      }
+    } catch (e) {}
+    return localStorage.getItem('theme') || 'dark';
+  });
+
+  // Dynamic user theme and font size preferences (stored per-user in local storage)
+  const [themeColor, setThemeColor] = useState(() => {
+    try {
+      const savedUser = localStorage.getItem('user');
+      if (savedUser) {
+        const parsed = JSON.parse(savedUser);
+        if (parsed) {
+          if (parsed.themeColor) return parsed.themeColor;
+          if (parsed.email) {
+            const savedEmailColor = localStorage.getItem(`themeColor-${parsed.email}`);
+            if (savedEmailColor) return savedEmailColor;
+          }
+          if (parsed.id) {
+            const savedIdColor = localStorage.getItem(`themeColor-${parsed.id}`);
+            if (savedIdColor) return savedIdColor;
+          }
+        }
+      }
+    } catch (e) {}
+    return localStorage.getItem('themeColor') || 'green';
+  });
+
+  const [fontSize, setFontSize] = useState(() => {
+    try {
+      const savedUser = localStorage.getItem('user');
+      if (savedUser) {
+        const parsed = JSON.parse(savedUser);
+        if (parsed) {
+          if (parsed.fontSize) return parsed.fontSize;
+          if (parsed.email) {
+            const savedEmailSize = localStorage.getItem(`fontSize-${parsed.email}`);
+            if (savedEmailSize) return savedEmailSize;
+          }
+          if (parsed.id) {
+            const savedIdSize = localStorage.getItem(`fontSize-${parsed.id}`);
+            if (savedIdSize) return savedIdSize;
+          }
+        }
+      }
+    } catch (e) {}
+    return localStorage.getItem('fontSize') || 'medium';
+  });
+
+  const [chatBgPattern, setChatBgPattern] = useState(() => {
+    try {
+      const savedUser = localStorage.getItem('user');
+      if (savedUser) {
+        const parsed = JSON.parse(savedUser);
+        if (parsed) {
+          if (parsed.chatBgPattern) return parsed.chatBgPattern;
+          if (parsed.email) {
+            const saved = localStorage.getItem(`chatBgPattern-${parsed.email}`);
+            if (saved) return saved;
+          }
+          if (parsed.id) {
+            const saved = localStorage.getItem(`chatBgPattern-${parsed.id}`);
+            if (saved) return saved;
+          }
+        }
+      }
+    } catch (e) {}
+    return localStorage.getItem('chatBgPattern') || 'dots';
+  });
+
+  useEffect(() => {
+    if (user) {
+      const savedTheme = user.theme || (user.email && localStorage.getItem(`theme-${user.email}`)) || localStorage.getItem(`theme-${user.id}`) || 'dark';
+      setTheme(savedTheme);
+      if (savedTheme === 'dark') {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+
+      const savedColor = user.themeColor || (user.email && localStorage.getItem(`themeColor-${user.email}`)) || localStorage.getItem(`themeColor-${user.id}`) || 'green';
+      const savedSize = user.fontSize || (user.email && localStorage.getItem(`fontSize-${user.email}`)) || localStorage.getItem(`fontSize-${user.id}`) || 'medium';
+      
+      setThemeColor(savedColor);
+      setFontSize(savedSize);
+
+      // Clean up previous theme/size classes
+      const rootClasses = document.documentElement.classList;
+      const classesToRemove = [];
+      rootClasses.forEach(className => {
+        if (className.startsWith('theme-') || className.startsWith('font-size-')) {
+          classesToRemove.push(className);
+        }
+      });
+      classesToRemove.forEach(cls => rootClasses.remove(cls));
+
+      rootClasses.add(`theme-${savedColor}`);
+      rootClasses.add(`font-size-${savedSize}`);
+    } else {
+      const savedTheme = localStorage.getItem('theme') || 'dark';
+      setTheme(savedTheme);
+      if (savedTheme === 'dark') {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+
+      // Defaults if not logged in
+      const rootClasses = document.documentElement.classList;
+      const classesToRemove = [];
+      rootClasses.forEach(className => {
+        if (className.startsWith('theme-') || className.startsWith('font-size-')) {
+          classesToRemove.push(className);
+        }
+      });
+      classesToRemove.forEach(cls => rootClasses.remove(cls));
+      rootClasses.add('theme-green');
+      rootClasses.add('font-size-medium');
+    }
+  }, [user]);
+
+  const updateAppearance = async (color, size, bgPattern) => {
+    if (user) {
+      // Save locally first for instant feedback
+      setThemeColor(color);
+      setFontSize(size);
+      if (bgPattern !== undefined) setChatBgPattern(bgPattern);
+      
+      const rootClasses = document.documentElement.classList;
+      
+      const themeClasses = [];
+      const sizeClasses = [];
+      rootClasses.forEach(className => {
+        if (className.startsWith('theme-')) themeClasses.push(className);
+        if (className.startsWith('font-size-')) sizeClasses.push(className);
+      });
+      themeClasses.forEach(cls => rootClasses.remove(cls));
+      sizeClasses.forEach(cls => rootClasses.remove(cls));
+      
+      rootClasses.add(`theme-${color}`);
+      rootClasses.add(`font-size-${size}`);
+
+      if (user.email) {
+        localStorage.setItem(`themeColor-${user.email}`, color);
+        localStorage.setItem(`fontSize-${user.email}`, size);
+        if (bgPattern !== undefined) localStorage.setItem(`chatBgPattern-${user.email}`, bgPattern);
+      }
+      if (user.id) {
+        localStorage.setItem(`themeColor-${user.id}`, color);
+        localStorage.setItem(`fontSize-${user.id}`, size);
+        if (bgPattern !== undefined) localStorage.setItem(`chatBgPattern-${user.id}`, bgPattern);
+      }
+
+      // Persist to database via PUT /api/users/profile
+      const body = { themeColor: color, fontSize: size, theme };
+      if (bgPattern !== undefined) body.chatBgPattern = bgPattern;
+      const response = await apiFetch('/api/users/profile', {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
+      const data = await handleResponse(response);
+      setUser(data.user);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      return data.user;
+    }
+  };
+
+  const updateThemeColor = (color) => {
+    updateAppearance(color, fontSize).catch(err => console.error('Failed to sync theme color:', err));
+  };
+
+  const updateFontSize = (size) => {
+    updateAppearance(themeColor, size).catch(err => console.error('Failed to sync font size:', err));
+  };
 
   // Helper to safely parse JSON response and handle HTTP errors gracefully
   const handleResponse = async (res) => {
@@ -39,20 +245,25 @@ export function AuthProvider({ children }) {
     return data;
   };
 
-  useEffect(() => {
-    const savedTheme = localStorage.getItem('theme') || 'dark';
-    setTheme(savedTheme);
-    if (savedTheme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, []);
-
   const toggleTheme = () => {
     const newTheme = theme === 'dark' ? 'light' : 'dark';
     setTheme(newTheme);
-    localStorage.setItem('theme', newTheme);
+    if (user) {
+      localStorage.setItem(`theme-${user.email}`, newTheme);
+      localStorage.setItem(`theme-${user.id}`, newTheme);
+      
+      // Update database
+      apiFetch('/api/users/profile', {
+        method: 'PUT',
+        body: JSON.stringify({ theme: newTheme })
+      }).then(async (response) => {
+        const data = await handleResponse(response);
+        setUser(data.user);
+        localStorage.setItem('user', JSON.stringify(data.user));
+      }).catch(err => console.error('Failed to sync theme:', err));
+    } else {
+      localStorage.setItem('theme', newTheme);
+    }
     if (newTheme === 'dark') {
       document.documentElement.classList.add('dark');
     } else {
@@ -84,15 +295,22 @@ export function AuthProvider({ children }) {
     if (response.status === 401 && accessToken) {
       try {
         console.log('Access token expired. Requesting refresh...');
+        const storedRefreshToken = localStorage.getItem('refreshToken');
         const refreshResponse = await fetch(`${apiBase}/api/auth/token/refresh`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${storedRefreshToken || ''}`
+          },
         });
 
         if (refreshResponse.ok) {
           const data = await handleResponse(refreshResponse);
           setAccessToken(data.accessToken);
           setUser(data.user);
+          localStorage.setItem('accessToken', data.accessToken);
+          localStorage.setItem('refreshToken', data.refreshToken || storedRefreshToken);
+          localStorage.setItem('user', JSON.stringify(data.user));
 
           // Retry the original request with new token
           headers['Authorization'] = `Bearer ${data.accessToken}`;
@@ -111,28 +329,90 @@ export function AuthProvider({ children }) {
     return response;
   };
 
-  // Perform silent authentication check on mount
+  const getAvatarUrl = (url) => {
+    if (!url) return null;
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:') || url.startsWith('data:')) {
+      return url;
+    }
+    return `${apiBase.replace(/\/+$/, '')}${url}`;
+  };
+
+  // Perform dynamic backend selection and silent authentication check on mount
   useEffect(() => {
-    const checkAuth = async () => {
+    const initAndCheckAuth = async () => {
+      const configuredApi = (import.meta.env.VITE_API_URL || 'http://localhost:5001').replace(/\/+$/, '');
+      let activeApi = configuredApi;
+      const isLocalHost = window.location.hostname === 'localhost' || 
+                          window.location.hostname === '127.0.0.1' || 
+                          window.location.hostname === '[::1]';
+      
+      if (isLocalHost) {
+        // Only probe when running locally — detect if dev server is up
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3500);
+          const response = await fetch(`${configuredApi}/api/health`, {
+            method: 'GET',
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          activeApi = response.ok ? configuredApi : onlineApiFallback;
+        } catch {
+          // Local dev server isn't running — fall back to online API
+          activeApi = onlineApiFallback;
+        }
+      } else {
+        // Live site: always trust the configured VITE_API_URL (or hardcoded fallback).
+        // Never probe — Render cold starts can take 30+ seconds and would cause a timeout.
+        activeApi = configuredApi.includes('localhost') || configuredApi.includes('127.0.0.1')
+          ? onlineApiFallback
+          : configuredApi;
+      }
+
+      setApiBase(activeApi);
+      const isLocal = activeApi.includes('localhost') || activeApi.includes('127.0.0.1');
+      console.log(
+        `%c🌐 Resolved backend target: ${isLocal ? 'LOCAL' : 'ONLINE'}`,
+        'color: #10b981; font-weight: bold; font-size: 12px; padding: 4px; border-radius: 4px;'
+      );
+
+      // Perform silent authentication check using resolved API base
       try {
-        const response = await fetch(`${apiBase}/api/auth/token/refresh`, {
+        const storedRefreshToken = localStorage.getItem('refreshToken');
+        if (!storedRefreshToken) {
+          logoutState();
+          setLoading(false);
+          return;
+        }
+
+        const response = await fetch(`${activeApi}/api/auth/token/refresh`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${storedRefreshToken}`
+          },
         });
 
         if (response.ok) {
           const data = await handleResponse(response);
           setAccessToken(data.accessToken);
           setUser(data.user);
+          localStorage.setItem('accessToken', data.accessToken);
+          localStorage.setItem('refreshToken', data.refreshToken || storedRefreshToken);
+          localStorage.setItem('user', JSON.stringify(data.user));
+        } else {
+          // Refresh failed (refresh token expired) -> force logout
+          console.warn('Session expired. Logging out.');
+          logoutState();
         }
       } catch (err) {
-        console.log('Silent auth check failed (not logged in).');
+        console.log('Silent auth check failed (not logged in).', err);
       } finally {
         setLoading(false);
       }
     };
 
-    checkAuth();
+    initAndCheckAuth();
   }, []);
 
   const requestOtp = async (email, mode = 'login') => {
@@ -147,6 +427,9 @@ export function AuthProvider({ children }) {
     if (data.status === 'admin_auto_login') {
       setAccessToken(data.accessToken);
       setUser(data.user);
+      localStorage.setItem('accessToken', data.accessToken);
+      localStorage.setItem('refreshToken', data.refreshToken);
+      localStorage.setItem('user', JSON.stringify(data.user));
     }
 
     return data; // Returns otp in dev mode
@@ -162,13 +445,29 @@ export function AuthProvider({ children }) {
     const data = await handleResponse(response);
     setAccessToken(data.accessToken);
     setUser(data.user);
+    localStorage.setItem('accessToken', data.accessToken);
+    localStorage.setItem('refreshToken', data.refreshToken);
+    localStorage.setItem('user', JSON.stringify(data.user));
     return data;
   };
 
   const loginWithGoogle = async () => {
-    const isMockConfig = !import.meta.env.VITE_FIREBASE_API_KEY || 
-                         import.meta.env.VITE_FIREBASE_API_KEY.includes('example') || 
-                         (import.meta.env.VITE_FIREBASE_PROJECT_ID && import.meta.env.VITE_FIREBASE_PROJECT_ID.includes('example'));
+    const isMockConfig = !hasValidConfig;
+
+    // Check if running inside mobile WebView wrapper (native Capacitor runtime)
+    if (window.Capacitor && window.Capacitor.isNativePlatform()) {
+      console.log('📱 Mobile runtime detected: Redirecting Google Login to system browser...');
+      const params = new URLSearchParams({
+        isMock: isMockConfig ? 'true' : 'false',
+        apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
+        authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
+        projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
+        appId: import.meta.env.VITE_FIREBASE_APP_ID || ''
+      });
+      const gatewayUrl = `${apiBase}/mobile-login-gateway?${params.toString()}`;
+      await Browser.open({ url: gatewayUrl });
+      return;
+    }
 
     let idToken;
     let isMockUsed = false;
@@ -177,10 +476,9 @@ export function AuthProvider({ children }) {
       console.warn('⚠️ Firebase Client config contains example placeholders. Using mock Google login for development.');
       idToken = 'mock_google_id_token';
       isMockUsed = true;
+    } else if (!auth || !googleProvider) {
+      throw new Error('Google Sign-In is unavailable. Firebase is not configured — please set valid VITE_FIREBASE_* environment variables.');
     } else {
-      if (!auth || !googleProvider) {
-        throw new Error('Google Authentication is not configured or failed to initialize.');
-      }
       // 1. Trigger Google login popup via Firebase Client SDK
       const userCredential = await signInWithPopup(auth, googleProvider);
       
@@ -211,7 +509,38 @@ export function AuthProvider({ children }) {
 
     setAccessToken(data.accessToken);
     setUser(data.user);
+    localStorage.setItem('accessToken', data.accessToken);
+    localStorage.setItem('refreshToken', data.refreshToken);
+    localStorage.setItem('user', JSON.stringify(data.user));
     return data;
+  };
+
+  const completeTokenLogin = async (newAccessToken, newRefreshToken) => {
+    setLoading(true);
+    try {
+      localStorage.setItem('accessToken', newAccessToken);
+      localStorage.setItem('refreshToken', newRefreshToken);
+      
+      const response = await fetch(`${apiBase}/api/users/profile`, {
+        headers: {
+          'Authorization': `Bearer ${newAccessToken}`
+        }
+      });
+      if (response.ok) {
+        const userData = await handleResponse(response);
+        setUser(userData);
+        localStorage.setItem('user', JSON.stringify(userData));
+        setAccessToken(newAccessToken);
+        console.log('🎉 Android WebView token authentication succeeded!');
+      } else {
+        throw new Error('Failed to fetch user with deep linked token.');
+      }
+    } catch (err) {
+      console.error('Failed to complete deep link token login:', err);
+      logoutState();
+    } finally {
+      setLoading(false);
+    }
   };
 
   const registerWithPassword = async (email, password, displayName, bio = null) => {
@@ -224,6 +553,9 @@ export function AuthProvider({ children }) {
     const data = await handleResponse(response);
     setAccessToken(data.accessToken);
     setUser(data.user);
+    localStorage.setItem('accessToken', data.accessToken);
+    localStorage.setItem('refreshToken', data.refreshToken);
+    localStorage.setItem('user', JSON.stringify(data.user));
     return data;
   };
 
@@ -243,6 +575,9 @@ export function AuthProvider({ children }) {
 
     setAccessToken(data.accessToken);
     setUser(data.user);
+    localStorage.setItem('accessToken', data.accessToken);
+    localStorage.setItem('refreshToken', data.refreshToken);
+    localStorage.setItem('user', JSON.stringify(data.user));
     return data;
   };
 
@@ -256,6 +591,9 @@ export function AuthProvider({ children }) {
     const data = await handleResponse(response);
     setAccessToken(data.accessToken);
     setUser(data.user);
+    localStorage.setItem('accessToken', data.accessToken);
+    localStorage.setItem('refreshToken', data.refreshToken);
+    localStorage.setItem('user', JSON.stringify(data.user));
     return data;
   };
 
@@ -267,10 +605,18 @@ export function AuthProvider({ children }) {
 
     const data = await handleResponse(response);
     setUser(data.user);
+    localStorage.setItem('user', JSON.stringify(data.user));
     return data.user;
   };
 
   const logoutState = () => {
+    // Preserve current theme, themeColor, and fontSize of this specific user before clearing
+    const currentTheme = user ? (localStorage.getItem(`theme-${user.email}`) || localStorage.getItem(`theme-${user.id}`)) : localStorage.getItem('theme');
+    const currentColor = user ? (localStorage.getItem(`themeColor-${user.email}`) || localStorage.getItem(`themeColor-${user.id}`)) : localStorage.getItem('themeColor');
+    const currentSize = user ? (localStorage.getItem(`fontSize-${user.email}`) || localStorage.getItem(`fontSize-${user.id}`)) : localStorage.getItem('fontSize');
+    const userEmail = user?.email;
+    const userId = user?.id;
+
     setUser(null);
     setAccessToken(null);
 
@@ -280,10 +626,21 @@ export function AuthProvider({ children }) {
       sessionStorage.clear();
 
       // Clear localStorage but preserve user's theme preference to avoid visual flashing
-      const currentTheme = localStorage.getItem('theme');
       localStorage.clear();
       if (currentTheme) {
         localStorage.setItem('theme', currentTheme);
+        if (userEmail) localStorage.setItem(`theme-${userEmail}`, currentTheme);
+        if (userId) localStorage.setItem(`theme-${userId}`, currentTheme);
+      }
+      if (currentColor) {
+        localStorage.setItem('themeColor', currentColor);
+        if (userEmail) localStorage.setItem(`themeColor-${userEmail}`, currentColor);
+        if (userId) localStorage.setItem(`themeColor-${userId}`, currentColor);
+      }
+      if (currentSize) {
+        localStorage.setItem('fontSize', currentSize);
+        if (userEmail) localStorage.setItem(`fontSize-${userEmail}`, currentSize);
+        if (userId) localStorage.setItem(`fontSize-${userId}`, currentSize);
       }
 
       // Clear Cache Storage (Cache API) to purge any cached assets or API responses
@@ -302,15 +659,13 @@ export function AuthProvider({ children }) {
   const logout = async () => {
     try {
       // Sign out from Firebase Client SDK to clear Google OAuth session state
-      if (auth) {
-        await auth.signOut();
-      }
+      if (auth) await auth.signOut();
     } catch (firebaseErr) {
       console.error('Error signing out of Firebase SDK:', firebaseErr);
     }
 
     try {
-      await fetch(`${apiBase}/api/auth/logout`, { method: 'POST' });
+      await apiFetch('/api/auth/logout', { method: 'POST' });
     } catch (err) {
       console.error('Error on logout API call:', err);
     } finally {
@@ -331,6 +686,7 @@ export function AuthProvider({ children }) {
 
     const data = await handleResponse(response);
     setUser(data.user);
+    localStorage.setItem('user', JSON.stringify(data.user));
     return data.user;
   };
 
@@ -347,11 +703,13 @@ export function AuthProvider({ children }) {
     user,
     accessToken,
     loading,
+    apiBase,
     isAdminPortalOpen,
     setIsAdminPortalOpen,
     requestOtp,
     verifyOtp,
     loginWithGoogle,
+    completeTokenLogin,
     logout,
     updateProfile,
     apiFetch,
@@ -363,6 +721,14 @@ export function AuthProvider({ children }) {
     toggleTheme,
     deleteAccount,
     handleResponse,
+    themeColor,
+    updateThemeColor,
+    fontSize,
+    updateFontSize,
+    getAvatarUrl,
+    updateAppearance,
+    chatBgPattern,
+    setChatBgPattern,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

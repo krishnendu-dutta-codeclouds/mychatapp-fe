@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useChat } from '../../context/ChatContext';
+import { useCall } from '../../context/CallContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import EmojiPicker from './EmojiPicker';
 
@@ -10,19 +11,30 @@ const getInitials = (name) => {
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 };
-import { 
-  Send, Paperclip, Smile, MoreVertical, MoreHorizontal, ShieldCheck, Phone, Video, 
-  Info, Image as ImageIcon, FileText, Film, Volume2, ArrowLeft, Trash2, LogOut, CheckCheck,
-  Users2, X, Plus, Reply, Pin, Pencil, ChevronDown, Download
+
+const hasOnlyEmojis = (str) => {
+  if (!str || !str.trim()) return false;
+  const cleaned = str.replace(/\s+/g, '');
+  const emojiRegex = /^(?:\p{Extended_Pictographic}|\p{Emoji_Component}|\u200d|\uFE0F)+$/u;
+  return emojiRegex.test(cleaned);
+};
+import {
+  Send, Paperclip, Smile, MoreVertical, MoreHorizontal, ShieldCheck, Phone, Video,
+  Info, Image as ImageIcon, FileText, Film, Volume2, ArrowLeft, Trash2, LogOut, Check, CheckCheck,
+  Users2, X, Plus, Reply, Pin, PinOff, Pencil, ChevronDown, Download, Mail, User, Calendar,
+  Ban, EyeOff, UserMinus
 } from 'lucide-react';
 
 function ChatWindow() {
-  const { user } = useAuth();
-  const { 
-    activeChat, messages, selectChat, sendMessage, sendMediaMessage, 
+  const { user, getAvatarUrl, apiBase, accessToken, chatBgPattern } = useAuth();
+  const {
+    activeChat, messages, selectChat, sendMessage, sendMediaMessage,
     setTypingIndicator, typingStatus, leaveGroup, addGroupMembers, friends,
-    replyingTo, setReplyingTo, editMessage, deleteMessage, pinMessage, reactMessage
+    replyingTo, setReplyingTo, editMessage, deleteMessage, pinMessage, reactMessage,
+    pinChatAction, unpinChatAction, blockUserAction, unblockUserAction,
+    hideChatAction, removeFriendshipAction
   } = useChat();
+  const { startCall } = useCall();
 
   const isGroup = activeChat ? !!activeChat.groupId : false;
 
@@ -34,7 +46,13 @@ function ChatWindow() {
   const [isTyping, setIsTyping] = useState(false);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [selectedFriendsToGroup, setSelectedFriendsToGroup] = useState([]);
-  
+
+  // Chat actions dropdown (header MoreVertical)
+  const [showChatMenu, setShowChatMenu] = useState(false);
+  const chatMenuRef = useRef(null);
+  // Confirmation modal for destructive actions
+  const [confirmAction, setConfirmAction] = useState(null); // { type, friendId, friendName }
+
   // Custom states for editing, highlighting, and scrolling
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [editInputText, setEditInputText] = useState('');
@@ -45,24 +63,22 @@ function ChatWindow() {
   // Helper function to download files locally (forces local browser download)
   const handleDownload = async (url, originalFilename) => {
     try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error('Download failed');
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = blobUrl;
-      
-      // Extract or set filename
-      const filename = originalFilename || url.split('/').pop() || 'download';
-      link.download = filename;
+      // Local blob or base64 preview URLs can be downloaded directly
+      if (url.startsWith('blob:') || url.startsWith('data:')) {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = originalFilename || 'download';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+      }
 
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
+      // Proxy remote (Firebase Storage) or server-stored files through the backend to avoid CORS and force local folder save
+      const downloadUrl = `${apiBase}/api/chat/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(originalFilename || '')}&token=${accessToken}`;
+      window.open(downloadUrl, '_blank');
     } catch (err) {
       console.error('Failed to download file:', err);
-      // Fallback to opening in a new tab if fetch fails
       window.open(url, '_blank');
     }
   };
@@ -90,7 +106,7 @@ function ChatWindow() {
     const before = text.substring(0, start);
     const after = text.substring(end);
     setInputText(before + emoji + after);
-    
+
     const newCursorPos = start + emoji.length;
     setTimeout(() => {
       ref.focus();
@@ -98,7 +114,7 @@ function ChatWindow() {
       ref.selectionEnd = newCursorPos;
     }, 0);
   };
-  
+
   // Mentions State
   const [showMentionDropdown, setShowMentionDropdown] = useState(false);
   const [mentionSearchQuery, setMentionSearchQuery] = useState('');
@@ -108,10 +124,10 @@ function ChatWindow() {
 
   const filteredMembers = isGroup && activeChat?.members
     ? activeChat.members
-        .filter(m => m.id !== user?.id)
-        .filter(m => m.displayName.toLowerCase().includes(mentionSearchQuery.toLowerCase()))
+      .filter(m => m.id !== user?.id)
+      .filter(m => m.displayName.toLowerCase().includes(mentionSearchQuery.toLowerCase()))
     : [];
-  
+
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
 
@@ -125,18 +141,43 @@ function ChatWindow() {
     setShowMentionDropdown(false);
   }, [activeChat?.id]);
 
+  // Auto-focus text input box when active chat changes
+  useEffect(() => {
+    if (activeChat) {
+      const timer = setTimeout(() => {
+        inputRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [activeChat?.id]);
+
   // Close message options dropdown when clicking anywhere else
   useEffect(() => {
     const handleOutsideClick = (e) => {
       if (activeMenuMessageId && !e.target.closest('.message-dropdown-container')) {
         setActiveMenuMessageId(null);
       }
+      if (showChatMenu && chatMenuRef.current && !chatMenuRef.current.contains(e.target)) {
+        setShowChatMenu(false);
+      }
     };
     document.addEventListener('click', handleOutsideClick);
     return () => {
       document.removeEventListener('click', handleOutsideClick);
     };
-  }, [activeMenuMessageId]);
+  }, [activeMenuMessageId, showChatMenu]);
+
+  // Handle confirmed destructive actions from the header/profile menu
+  const handleConfirmChatAction = async () => {
+    if (!confirmAction) return;
+    const { type, friendId } = confirmAction;
+    if (type === 'block') await blockUserAction(friendId);
+    if (type === 'unblock') await unblockUserAction(friendId);
+    if (type === 'removeChat') await hideChatAction(friendId);
+    if (type === 'removeFriendship') { await removeFriendshipAction(friendId); selectChat(null); }
+    setConfirmAction(null);
+    setShowGroupInfo(false);
+  };
 
   if (!user) return null;
 
@@ -144,7 +185,7 @@ function ChatWindow() {
   const handleInputChange = (e) => {
     const val = e.target.value;
     setInputText(val);
-    
+
     if (!isTyping) {
       setIsTyping(true);
       setTypingIndicator(true);
@@ -164,11 +205,11 @@ function ChatWindow() {
       const selectionStart = e.target.selectionStart || 0;
       const textBeforeCursor = val.slice(0, selectionStart);
       const lastAtOffset = textBeforeCursor.lastIndexOf('@');
-      
+
       if (lastAtOffset !== -1) {
         // Check if the '@' is at the start or preceded by a space
         const isTriggered = lastAtOffset === 0 || textBeforeCursor[lastAtOffset - 1] === ' ';
-        
+
         if (isTriggered) {
           const query = textBeforeCursor.slice(lastAtOffset + 1);
           // Only show dropdown if the query doesn't contain spaces
@@ -212,7 +253,7 @@ function ChatWindow() {
     const newText = `${textBeforeMention}@${member.displayName} ${textAfterCursor}`;
     setInputText(newText);
     setShowMentionDropdown(false);
-    
+
     // Maintain focus and set cursor position right after the mention space
     setTimeout(() => {
       if (inputRef.current) {
@@ -227,10 +268,10 @@ function ChatWindow() {
   const handleSend = (e) => {
     e.preventDefault();
     if (!inputText.trim()) return;
-    
+
     sendMessage(inputText.trim(), 'text');
     setInputText('');
-    
+
     // Clear typing status immediately on send
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
@@ -243,7 +284,7 @@ function ChatWindow() {
   const handleFileUpload = async (e, type) => {
     const file = e.target.files[0];
     if (!file) return;
-    
+
     setShowAttachMenu(false);
     try {
       await sendMediaMessage(file);
@@ -265,51 +306,50 @@ function ChatWindow() {
 
     // Sort members by display name length descending to avoid partial matching bugs (e.g., matching "John" in "John Doe")
     const sortedMembers = [...members].sort((a, b) => b.displayName.length - a.displayName.length);
-    
+
     // Escape special characters in display names to build a safe regex
     const escapedNames = sortedMembers.map(m => m.displayName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'));
     if (escapedNames.length === 0) return content;
 
     // Match exact display names preceded by '@' and followed by space, punctuation, or end of string
     const regex = new RegExp(`@(${escapedNames.join('|')})(?=\\s|$|[.,!?;:])`, 'g');
-    
+
     const parts = [];
     let lastIndex = 0;
     let match;
-    
+
     regex.lastIndex = 0;
     while ((match = regex.exec(content)) !== null) {
       const matchIndex = match.index;
       const matchText = match[0];
       const nameOnly = match[1];
-      
+
       if (matchIndex > lastIndex) {
         parts.push(content.substring(lastIndex, matchIndex));
       }
-      
+
       const member = sortedMembers.find(m => m.displayName === nameOnly);
       const isCurrentUserMentioned = member?.id === user?.id;
-      
+
       parts.push(
-        <span 
-          key={matchIndex} 
-          className={`font-semibold px-1 rounded-md transition-colors ${
-            isCurrentUserMentioned 
-              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold font-sans' 
-              : 'text-emerald-400 hover:underline cursor-pointer font-sans'
-          }`}
+        <span
+          key={matchIndex}
+          className={`font-semibold px-1 rounded-md transition-colors ${isCurrentUserMentioned
+            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold font-sans'
+            : 'text-emerald-400 hover:underline cursor-pointer font-sans'
+            }`}
         >
           {matchText}
         </span>
       );
-      
+
       lastIndex = regex.lastIndex;
     }
-    
+
     if (lastIndex < content.length) {
       parts.push(content.substring(lastIndex));
     }
-    
+
     return parts.length > 0 ? parts : content;
   };
 
@@ -319,9 +359,9 @@ function ChatWindow() {
     const isGroup = !!activeChat.groupId;
     const chatId = isGroup ? activeChat.id : [user.id, activeChat.id].sort().join('_');
     const chatTypers = typingStatus[chatId];
-    
+
     if (!chatTypers || Object.keys(chatTypers).length === 0) return null;
-    
+
     if (isGroup) {
       const names = Object.keys(chatTypers)
         .filter(id => id !== user.id)
@@ -329,7 +369,7 @@ function ChatWindow() {
           const member = activeChat.members?.find(m => m.id === id);
           return member ? member.displayName : 'Someone';
         });
-      
+
       if (names.length === 0) return null;
       if (names.length === 1) return `${names[0]} is typing...`;
       return `${names.slice(0, 2).join(', ')} are typing...`;
@@ -347,22 +387,22 @@ function ChatWindow() {
   // --- 1. EMPTY CHAT STATE ---
   if (!activeChat) {
     return (
-      <div className="h-full w-full chat-bg flex flex-col items-center justify-center p-8 text-center select-none font-sans">
-        <div className="max-w-md p-8 rounded-3xl glass border border-zinc-800/80 shadow-2xl flex flex-col items-center">
-          <motion.div 
-            animate={{ 
+      <div className="h-full w-full chat-bg flex flex-col items-center justify-center p-8 text-center select-none font-sans relative overflow-hidden" data-bg-pattern={chatBgPattern}>
+        <div className="max-w-md p-8 rounded-3xl glass border border-zinc-800/80 shadow-2xl flex flex-col items-center relative z-10">
+          <motion.div
+            animate={{
               y: [0, -6, 0],
             }}
-            transition={{ 
-              duration: 4, 
-              repeat: Infinity, 
-              ease: "easeInOut" 
+            transition={{
+              duration: 4,
+              repeat: Infinity,
+              ease: "easeInOut"
             }}
-            className="h-20 w-20 bg-gradient-to-tr from-emerald-500/10 to-teal-500/10 border border-emerald-500/20 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-lg shadow-emerald-500/5"
+            className="h-20 w-20 bg-gradient-to-tr from-emerald-500/10 to-emerald-500/5 border border-emerald-500/20 rounded-3xl flex items-center justify-center text-5xl mb-6 shadow-lg shadow-emerald-500/5"
           >
             💬
           </motion.div>
-          <h2 className="text-xl font-bold tracking-tight text-white font-sans">Secure Chat Gateway</h2>
+          <h2 className="text-xl font-bold tracking-tight text-white font-sans">Talkzen</h2>
           <p className="mt-2.5 text-xs text-zinc-400 max-w-[320px] leading-relaxed">
             All conversations are synchronized in real-time. Direct messages, group channels, and media attachments are isolated securely.
           </p>
@@ -381,22 +421,22 @@ function ChatWindow() {
 
   return (
     <div className="h-full w-full flex flex-col bg-zinc-950 font-sans relative overflow-hidden">
-      
+
       {/* 2. CHAT WINDOW HEADER */}
       <div className="p-4 bg-zinc-900/60 border-b border-zinc-800/50 backdrop-blur-md flex items-center justify-between z-10">
         <div className="flex items-center gap-3 min-w-0">
-          <button 
+          <button
             onClick={() => selectChat(null)}
             className="lg:hidden p-1.5 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded-lg transition mr-1"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
 
-          <div className="relative cursor-pointer" onClick={() => isGroup && setShowGroupInfo(true)}>
+          <div className="relative cursor-pointer" onClick={() => setShowGroupInfo(true)}>
             {activeChat.avatarUrl ? (
-              <img src={activeChat.avatarUrl} alt={activeChat.name || activeChat.displayName} className="h-10 w-10 rounded-full object-cover border border-zinc-800" />
+              <img src={getAvatarUrl(activeChat.avatarUrl)} alt={activeChat.name || activeChat.displayName} className="h-10 w-10 rounded-full object-cover border border-zinc-800" />
             ) : (
-              <div className="h-10 w-10 rounded-full bg-gradient-to-tr from-emerald-500/20 to-teal-500/20 border border-zinc-800 flex items-center justify-center font-bold text-emerald-400 text-xs uppercase">
+              <div className="h-10 w-10 rounded-full bg-gradient-to-tr from-emerald-500/20 to-emerald-500/10 border border-zinc-800 flex items-center justify-center font-bold text-emerald-400 text-xs uppercase">
                 {isGroup ? <Users2 className="h-5 w-5" /> : getInitials(activeChat.displayName)}
               </div>
             )}
@@ -405,7 +445,7 @@ function ChatWindow() {
             )}
           </div>
 
-          <div className="min-w-0" onClick={() => isGroup && setShowGroupInfo(true)}>
+          <div className="min-w-0" onClick={() => setShowGroupInfo(true)}>
             <h3 className="text-xs font-semibold text-white truncate leading-tight">
               {isGroup ? activeChat.name : activeChat.displayName}
             </h3>
@@ -417,7 +457,7 @@ function ChatWindow() {
               ) : isOnline ? (
                 'online'
               ) : (
-                activeChat.lastSeen 
+                activeChat.lastSeen
                   ? `last seen ${new Date(activeChat.lastSeen).toLocaleDateString()} at ${formatTime(activeChat.lastSeen)}`
                   : 'offline'
               )}
@@ -427,23 +467,88 @@ function ChatWindow() {
 
         {/* Action icons */}
         <div className="flex items-center gap-1">
-          <button className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800/50 rounded-xl transition">
+          <button
+            onClick={() => startCall(activeChat.id, activeChat.displayName, activeChat.avatarUrl)}
+            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800/50 rounded-xl transition"
+            title="Start Audio Call"
+          >
             <Phone className="h-4 w-4" />
           </button>
           <button className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800/50 rounded-xl transition">
             <Video className="h-4 w-4" />
           </button>
           {isGroup ? (
-            <button 
+            <button
               onClick={() => setShowGroupInfo(true)}
               className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800/50 rounded-xl transition"
             >
               <Info className="h-4 w-4" />
             </button>
           ) : (
-            <button className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800/50 rounded-xl transition">
-              <MoreVertical className="h-4 w-4" />
-            </button>
+            <div className="relative" ref={chatMenuRef}>
+              <button
+                onClick={() => setShowChatMenu(prev => !prev)}
+                className={`p-2 text-zinc-400 hover:text-white hover:bg-zinc-800/50 rounded-xl transition ${showChatMenu ? 'bg-zinc-800 text-white' : ''}`}
+              >
+                <MoreVertical className="h-4 w-4" />
+              </button>
+
+              {showChatMenu && (
+                <div className="absolute right-0 top-10 w-52 bg-zinc-950/95 backdrop-blur-md border border-zinc-800/80 rounded-xl shadow-2xl py-1.5 z-50">
+                  {/* Pin / Unpin */}
+                  <button
+                    onClick={() => {
+                      if (activeChat.isPinned) unpinChatAction(activeChat.id);
+                      else pinChatAction(activeChat.id);
+                      setShowChatMenu(false);
+                    }}
+                    className="w-full px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 hover:text-white transition flex items-center gap-2"
+                  >
+                    {activeChat.isPinned
+                      ? <><PinOff className="h-3.5 w-3.5 text-zinc-400" /> Unpin Chat</>
+                      : <><Pin className="h-3.5 w-3.5 text-emerald-400 rotate-45" /> Pin Chat</>}
+                  </button>
+
+                  {/* Block / Unblock */}
+                  <button
+                    onClick={() => {
+                      setConfirmAction({ type: activeChat.isBlocked ? 'unblock' : 'block', friendId: activeChat.id, friendName: activeChat.displayName });
+                      setShowChatMenu(false);
+                    }}
+                    className="w-full px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 hover:text-white transition flex items-center gap-2"
+                  >
+                    <Ban className="h-3.5 w-3.5 text-amber-500" />
+                    {activeChat.isBlocked ? 'Unblock User' : 'Block User'}
+                  </button>
+
+                  {/* Remove Chat */}
+                  <button
+                    onClick={() => {
+                      setConfirmAction({ type: 'removeChat', friendId: activeChat.id, friendName: activeChat.displayName });
+                      setShowChatMenu(false);
+                    }}
+                    className="w-full px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-800/50 hover:text-white transition flex items-center gap-2"
+                  >
+                    <EyeOff className="h-3.5 w-3.5 text-zinc-400" />
+                    Remove Chat
+                  </button>
+
+                  <div className="border-t border-zinc-800/60 my-1" />
+
+                  {/* Remove Friend */}
+                  <button
+                    onClick={() => {
+                      setConfirmAction({ type: 'removeFriendship', friendId: activeChat.id, friendName: activeChat.displayName });
+                      setShowChatMenu(false);
+                    }}
+                    className="w-full px-3 py-2 text-xs text-rose-400 hover:bg-rose-500/10 transition flex items-center gap-2"
+                  >
+                    <UserMinus className="h-3.5 w-3.5 text-rose-500" />
+                    Remove Friend
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -453,7 +558,7 @@ function ChatWindow() {
         const pinnedMessage = [...messages].reverse().find(m => m.isPinned === 1);
         if (!pinnedMessage) return null;
         return (
-          <div 
+          <div
             onClick={() => scrollToMessage(pinnedMessage.id)}
             className="px-4 py-2 bg-zinc-900/95 border-b border-zinc-850/60 flex items-center justify-between cursor-pointer hover:bg-zinc-850/60 transition backdrop-blur-md z-10"
           >
@@ -462,15 +567,15 @@ function ChatWindow() {
               <div className="min-w-0 text-left">
                 <span className="text-[9px] font-bold text-emerald-400 block leading-none font-sans">Pinned Message</span>
                 <span className="text-[10px] text-zinc-300 truncate block mt-0.5">
-                  {pinnedMessage.type === 'deleted' 
-                    ? 'This message was deleted' 
-                    : pinnedMessage.type === 'text' 
-                      ? pinnedMessage.content 
+                  {pinnedMessage.type === 'deleted'
+                    ? 'This message was deleted'
+                    : pinnedMessage.type === 'text'
+                      ? pinnedMessage.content
                       : `[${pinnedMessage.type}]`}
                 </span>
               </div>
             </div>
-            <button 
+            <button
               onClick={(e) => {
                 e.stopPropagation();
                 pinMessage(pinnedMessage.id, false);
@@ -485,12 +590,12 @@ function ChatWindow() {
       })()}
 
       {/* 3. MESSAGES SCROLL LIST */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 chat-bg">
-        
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 chat-bg relative" data-bg-pattern={chatBgPattern}>
+
         {messages.map((msg) => {
           const isMe = msg.senderId === user.id;
           const isHighlighted = highlightedMessageId === msg.id;
-          
+
           // Render group system notifications differently
           if (!msg.receiverId && !msg.groupId && !msg.senderId) {
             // It's a system notice
@@ -502,7 +607,7 @@ function ChatWindow() {
               </div>
             );
           }
-          
+
           // System message check (fallback based on content)
           const isSystem = msg.content.includes('created') || msg.content.includes('added') || msg.content.includes('left') || msg.content.includes('was added');
           if (isSystem && isGroup) {
@@ -516,15 +621,15 @@ function ChatWindow() {
           }
 
           return (
-            <div 
-              key={msg.id} 
+            <div
+              key={msg.id}
               ref={el => {
                 if (el) messageRefs.current.set(msg.id, el);
                 else messageRefs.current.delete(msg.id);
               }}
               className={`flex ${isMe ? 'justify-end' : 'justify-start'} group relative`}
             >
-              <div 
+              <div
                 onDoubleClick={() => {
                   if (msg.type !== 'deleted') {
                     setReplyingTo(msg);
@@ -533,13 +638,11 @@ function ChatWindow() {
                     }
                   }
                 }}
-                className={`relative max-w-[75%] py-2 px-3.5 rounded-2xl shadow-md flex flex-col transition-all duration-300 ${
-                  isHighlighted ? 'ring-2 ring-emerald-500/60 scale-[1.02] bg-emerald-500/10' : ''
-                } ${
-                  isMe 
-                    ? 'bg-gradient-to-tr from-emerald-500/15 to-emerald-400/5 border border-emerald-500/20 text-white bubble-out' 
+                className={`relative max-w-[75%] py-2 px-3.5 rounded-2xl shadow-md flex flex-col transition-all duration-300 ${isHighlighted ? 'ring-2 ring-emerald-500/60 scale-[1.02] bg-emerald-500/10' : ''
+                  } ${isMe
+                    ? 'bg-gradient-to-tr from-emerald-500/15 to-emerald-400/5 border border-emerald-500/20 text-white bubble-out'
                     : 'bg-zinc-900/85 backdrop-blur-sm border border-zinc-800/80 text-zinc-200 bubble-in'
-                }`}
+                  }`}
                 title={msg.type !== 'deleted' ? "Double-click to reply" : undefined}
               >
                 {/* Sender Name in Groups */}
@@ -551,7 +654,7 @@ function ChatWindow() {
 
                 {/* Reply Context Block */}
                 {msg.parentMessageId && (
-                  <div 
+                  <div
                     onClick={() => scrollToMessage(msg.parentMessageId)}
                     className="mb-1.5 p-2 bg-zinc-950/40 hover:bg-zinc-950/60 transition border-l-2 border-emerald-500 rounded-r-lg text-left cursor-pointer select-none max-w-full"
                   >
@@ -559,10 +662,10 @@ function ChatWindow() {
                       {msg.parentMessageSenderId === user.id ? 'You' : msg.parentMessageSenderName}
                     </span>
                     <span className="text-[10px] text-zinc-400 truncate block mt-0.5 font-sans">
-                      {msg.parentMessageType === 'deleted' 
+                      {msg.parentMessageType === 'deleted'
                         ? 'This message was deleted'
-                        : msg.parentMessageType === 'text' 
-                          ? msg.parentMessageContent 
+                        : msg.parentMessageType === 'text'
+                          ? msg.parentMessageContent
                           : `[${msg.parentMessageType}]`}
                     </span>
                   </div>
@@ -624,9 +727,9 @@ function ChatWindow() {
                                   {parsed.mediaUrl && (
                                     <div className="h-9 w-9 bg-zinc-900 rounded overflow-hidden flex-shrink-0 border border-zinc-800 shadow-sm">
                                       {parsed.mediaType === 'video' ? (
-                                        <video src={parsed.mediaUrl} className="h-full w-full object-cover" muted />
+                                        <video src={getAvatarUrl(parsed.mediaUrl)} className="h-full w-full object-cover" muted />
                                       ) : (
-                                        <img src={parsed.mediaUrl} alt="Status update" className="h-full w-full object-cover" />
+                                        <img src={getAvatarUrl(parsed.mediaUrl)} alt="Status update" className="h-full w-full object-cover" />
                                       )}
                                     </div>
                                   )}
@@ -650,7 +753,7 @@ function ChatWindow() {
 
                     {/* A: Text Content */}
                     {msg.type === 'text' && (
-                      <p className="text-xs leading-relaxed whitespace-pre-wrap select-text break-words">
+                      <p className={`leading-relaxed whitespace-pre-wrap select-text break-words ${hasOnlyEmojis(msg.content) ? 'text-3xl py-0.5' : 'text-xs'}`}>
                         {renderMessageContent(msg.content, activeChat.members)}
                       </p>
                     )}
@@ -658,11 +761,11 @@ function ChatWindow() {
                     {/* B: Image Media Attachment */}
                     {msg.type === 'image' && (
                       <div className="relative group/media max-w-[280px] my-1 rounded-xl overflow-hidden border border-zinc-800">
-                        <div 
+                        <div
                           onClick={() => setLightboxImage(msg.content)}
                           className="cursor-pointer hover:opacity-90 transition duration-200"
                         >
-                          <img src={msg.content} alt="Chat attachment" className="w-full h-auto object-cover max-h-48" />
+                          <img src={getAvatarUrl(msg.content)} alt="Chat attachment" className="w-full h-auto object-cover max-h-48" />
                         </div>
                         <button
                           type="button"
@@ -681,7 +784,7 @@ function ChatWindow() {
                     {/* C: Video Media Attachment */}
                     {msg.type === 'video' && (
                       <div className="relative group/media max-w-[280px] my-1 rounded-xl overflow-hidden border border-zinc-800">
-                        <video src={msg.content} controls className="w-full h-auto max-h-48" />
+                        <video src={getAvatarUrl(msg.content)} controls className="w-full h-auto max-h-48" />
                         <button
                           type="button"
                           onClick={(e) => {
@@ -700,7 +803,7 @@ function ChatWindow() {
                     {msg.type === 'audio' && (
                       <div className="flex items-center gap-3 p-2 bg-zinc-950/40 border border-zinc-800 rounded-xl my-1 min-w-[260px]">
                         <Volume2 className="h-4 w-4 text-emerald-400 flex-shrink-0" />
-                        <audio src={msg.content} controls className="w-full h-7 accent-emerald-500" />
+                        <audio src={getAvatarUrl(msg.content)} controls className="w-full h-7 accent-emerald-500" />
                         <button
                           type="button"
                           onClick={(e) => {
@@ -717,7 +820,7 @@ function ChatWindow() {
 
                     {/* E: Generic File Attachment */}
                     {msg.type === 'file' && (
-                      <div 
+                      <div
                         onClick={() => handleDownload(msg.content, 'attachment')}
                         className="flex items-center justify-between gap-3 p-2.5 bg-zinc-950/40 border border-zinc-800 rounded-xl my-1 hover:bg-zinc-800/20 transition duration-200 cursor-pointer min-w-[200px]"
                       >
@@ -752,12 +855,24 @@ function ChatWindow() {
                   <span className="text-[9px] text-zinc-500 font-medium">
                     {formatTime(msg.createdAt)}
                   </span>
-                  
+
                   {isMe && (
-                    <div className="ml-1">
-                      {msg.status === 'sent' && <span className="text-[10px] text-zinc-500 font-semibold leading-none">✓</span>}
-                      {msg.status === 'delivered' && <span className="text-[10px] text-zinc-400 font-bold leading-none">✓✓</span>}
-                      {msg.status === 'read' && <span className="text-[10px] text-emerald-400 font-bold leading-none">✓✓</span>}
+                    <div className="ml-1 flex items-center">
+                      {msg.status === 'sent' && (
+                        <Check className="h-3 w-3 text-zinc-500 stroke-[2.5]" />
+                      )}
+                      {msg.status === 'delivered' && (
+                        <div className="relative flex items-center w-[14px] h-3">
+                          <Check className="absolute left-0 h-3 w-3 text-zinc-450 stroke-[2.5]" />
+                          <Check className="absolute left-[3.5px] h-3 w-3 text-zinc-450 stroke-[2.5]" />
+                        </div>
+                      )}
+                      {msg.status === 'read' && (
+                        <div className="relative flex items-center w-[14px] h-3">
+                          <Check className="absolute left-0 h-3 w-3 text-sky-400 stroke-[2.5]" />
+                          <Check className="absolute left-[3.5px] h-3 w-3 text-sky-400 stroke-[2.5]" />
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -771,10 +886,9 @@ function ChatWindow() {
 
                 {/* Quick Hover Actions Bar (WhatsApp Style) */}
                 {msg.type !== 'deleted' && (
-                  <div 
-                    className={`absolute top-1/2 -translate-y-1/2 z-30 opacity-0 group-hover:opacity-100 transition-all duration-200 flex items-center gap-0.5 bg-zinc-900/95 border border-zinc-800/80 p-1 rounded-full shadow-xl backdrop-blur-md ${
-                      isMe ? 'right-full mr-2.5' : 'left-full ml-2.5'
-                    }`}
+                  <div
+                    className={`absolute top-1/2 -translate-y-1/2 z-30 opacity-0 group-hover:opacity-100 transition-all duration-200 flex items-center gap-0.5 bg-zinc-900/95 border border-zinc-800/80 p-1 rounded-full shadow-xl backdrop-blur-md ${isMe ? 'right-full mr-2.5' : 'left-full ml-2.5'
+                      }`}
                   >
                     {/* Reply Icon Button */}
                     <button
@@ -821,9 +935,8 @@ function ChatWindow() {
 
                       {/* Glassmorphic Dropdown Actions Menu */}
                       {activeMenuMessageId === msg.id && (
-                        <div className={`message-dropdown-container absolute z-40 w-36 p-1.5 bg-zinc-900/95 border border-zinc-800 rounded-xl shadow-2xl flex flex-col gap-0.5 backdrop-blur-md ${
-                          isMe ? 'right-0 top-8' : 'left-0 top-8'
-                        }`}>
+                        <div className={`message-dropdown-container absolute z-40 w-36 p-1.5 bg-zinc-900/95 border border-zinc-800 rounded-xl shadow-2xl flex flex-col gap-0.5 backdrop-blur-md ${isMe ? 'right-0 top-8' : 'left-0 top-8'
+                          }`}>
                           {/* Emojis Reaction Row inside Dropdown */}
                           <div className="flex justify-between items-center border-b border-zinc-800/60 pb-1.5 pt-0.5 px-1 mb-1 gap-0.5">
                             {emojis.slice(0, 5).map(emoji => (
@@ -907,7 +1020,7 @@ function ChatWindow() {
       {/* 4. CHAT INPUT ATTACHMENT MENU / QUICK ACTION MENU */}
       <AnimatePresence>
         {showAttachMenu && (
-          <motion.div 
+          <motion.div
             initial={{ y: 15, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 15, opacity: 0 }}
@@ -948,13 +1061,13 @@ function ChatWindow() {
               <span className="text-[10px] text-zinc-300 truncate block mt-0.5 font-sans">
                 {replyingTo.type === 'deleted'
                   ? 'This message was deleted'
-                  : replyingTo.type === 'text' 
-                    ? replyingTo.content 
+                  : replyingTo.type === 'text'
+                    ? replyingTo.content
                     : `[${replyingTo.type}]`}
               </span>
             </div>
           </div>
-          <button 
+          <button
             type="button"
             onClick={() => setReplyingTo(null)}
             className="p-1 text-zinc-500 hover:text-zinc-300 rounded-lg transition"
@@ -966,17 +1079,17 @@ function ChatWindow() {
       )}
 
       {/* 5. BOTTOM TEXT ENTRY BOX */}
-      <form 
+      <form
         onSubmit={handleSend}
-        className="px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] bg-zinc-900/60 border-t border-zinc-800/50 backdrop-blur-md flex items-center gap-3 z-10"
+        className="px-4 h-16 bg-zinc-900/60 border-t border-zinc-800/40 backdrop-blur-md flex items-center gap-2.5 z-10"
       >
-        <button 
+        <button
           type="button"
           onClick={() => {
             setShowAttachMenu(prev => !prev);
             setShowEmojiPicker(false);
           }}
-          className={`p-2.5 text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 rounded-xl transition duration-200 ${showAttachMenu ? 'bg-zinc-800 text-emerald-400' : ''}`}
+          className={`p-2.5 text-zinc-400 hover:text-emerald-400 hover:bg-zinc-850 rounded-xl transition duration-150 flex-shrink-0 ${showAttachMenu ? 'bg-zinc-850 text-emerald-400' : ''}`}
         >
           <Paperclip className="h-5 w-5" />
         </button>
@@ -1004,17 +1117,16 @@ function ChatWindow() {
                         selectMention(member);
                       }}
                       onMouseEnter={() => setMentionSelectedIndex(idx)}
-                      className={`flex items-center gap-3 px-3 py-2 cursor-pointer transition duration-150 ${
-                        isSelected 
-                          ? 'bg-emerald-500/10 text-emerald-400 border-l-2 border-emerald-500' 
-                          : 'text-zinc-300 hover:bg-zinc-800/40'
-                      }`}
+                      className={`flex items-center gap-3 px-3 py-2 cursor-pointer transition duration-150 ${isSelected
+                        ? 'bg-emerald-500/10 text-emerald-400 border-l-2 border-emerald-500'
+                        : 'text-zinc-300 hover:bg-zinc-800/40'
+                        }`}
                     >
                       {member.avatarUrl ? (
-                        <img 
-                          src={member.avatarUrl} 
-                          alt={member.displayName} 
-                          className="h-6 w-6 rounded-full object-cover border border-zinc-800" 
+                        <img
+                          src={getAvatarUrl(member.avatarUrl)}
+                          alt={member.displayName}
+                          className="h-6 w-6 rounded-full object-cover border border-zinc-800"
                         />
                       ) : (
                         <div className="h-6 w-6 rounded-full bg-zinc-800 border border-zinc-700/80 flex items-center justify-center font-bold text-[10px] text-zinc-400 uppercase">
@@ -1050,25 +1162,25 @@ function ChatWindow() {
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             placeholder="Type a message..."
-            className="block w-full px-4 py-3 bg-zinc-950 border border-zinc-800/80 rounded-2xl text-zinc-200 placeholder-zinc-500 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500/40 focus:border-emerald-500/40 transition duration-200"
+            className="block w-full pl-4 pr-11 py-2.5 bg-zinc-950 border border-zinc-800/80 rounded-xl text-zinc-200 placeholder-zinc-500 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500/40 focus:border-emerald-500/40 transition duration-150"
           />
-          
-          <button 
+
+          <button
             type="button"
             onClick={() => {
               setShowEmojiPicker(prev => !prev);
               setShowAttachMenu(false);
             }}
-            className={`absolute right-3 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-emerald-400 transition ${showEmojiPicker ? 'text-emerald-400' : ''}`}
+            className={`absolute right-3.5 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-emerald-400 transition ${showEmojiPicker ? 'text-emerald-400' : ''}`}
           >
             <Smile className="h-5 w-5" />
           </button>
         </div>
 
-        <button 
+        <button
           type="submit"
           disabled={!inputText.trim()}
-          className="p-3 bg-emerald-500 hover:bg-emerald-400 disabled:bg-zinc-800 disabled:text-zinc-600 text-zinc-950 rounded-2xl shadow-lg shadow-emerald-500/5 transition duration-200 flex-shrink-0"
+          className="p-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:bg-zinc-800 disabled:text-zinc-600 text-zinc-950 rounded-xl shadow-lg shadow-emerald-500/5 transition duration-150 flex-shrink-0"
         >
           <Send className="h-5 w-5" />
         </button>
@@ -1077,13 +1189,13 @@ function ChatWindow() {
       {/* 7. FULLSCREEN LIGHTBOX FOR IMAGES */}
       <AnimatePresence>
         {lightboxImage && (
-          <div 
+          <div
             className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center p-4"
             onClick={() => setLightboxImage(null)}
           >
             {/* Action Bar inside Lightbox */}
             <div className="absolute top-4 right-4 flex gap-3" onClick={(e) => e.stopPropagation()}>
-              <button 
+              <button
                 type="button"
                 onClick={() => handleDownload(lightboxImage, 'image.png')}
                 className="p-2 bg-zinc-900 text-white hover:text-emerald-400 rounded-full border border-zinc-800 hover:bg-zinc-800 transition duration-150 shadow-lg"
@@ -1091,7 +1203,7 @@ function ChatWindow() {
               >
                 <Download className="h-5 w-5" />
               </button>
-              <button 
+              <button
                 type="button"
                 onClick={() => setLightboxImage(null)}
                 className="p-2 bg-zinc-900 text-white rounded-full border border-zinc-800 hover:bg-zinc-800 transition duration-150 shadow-lg"
@@ -1100,12 +1212,12 @@ function ChatWindow() {
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <motion.img 
+            <motion.img
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              src={lightboxImage} 
-              alt="Attachment Full size" 
+              src={getAvatarUrl(lightboxImage)}
+              alt="Attachment Full size"
               className="max-w-full max-h-full object-contain rounded-xl shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             />
@@ -1114,93 +1226,272 @@ function ChatWindow() {
       </AnimatePresence>
 
 
-      {/* 8. SLIDE-OUT GROUP INFO / LEAVE DRAWER */}
+      {/* 8. SLIDE-OUT INFO DRAWER */}
       <AnimatePresence>
-        {showGroupInfo && isGroup && (
+        {showGroupInfo && (
           <div className="absolute inset-0 bg-black/40 backdrop-blur-xs z-30 flex justify-end">
-            <motion.div 
+            <motion.div
               initial={{ x: '100%' }}
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
               className="w-full max-w-xs h-full bg-zinc-900 border-l border-zinc-800 p-6 flex flex-col justify-between overflow-y-auto"
             >
-              <div>
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Group Info</h3>
-                  <button 
-                    onClick={() => setShowGroupInfo(false)}
-                    className="p-1 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-
-                {/* Group Details */}
-                <div className="flex flex-col items-center text-center pb-6 border-b border-zinc-850">
-                  {activeChat.avatarUrl ? (
-                    <img src={activeChat.avatarUrl} alt="Group" className="h-16 w-16 rounded-full object-cover border border-zinc-800" />
-                  ) : (
-                    <div className="h-16 w-16 rounded-full bg-gradient-to-tr from-emerald-500/20 to-teal-500/20 border border-zinc-800 flex items-center justify-center text-emerald-400 font-bold text-lg">
-                      <Users2 className="h-8 w-8" />
-                    </div>
-                  )}
-                  <h4 className="text-sm font-bold text-white mt-3 leading-tight">{activeChat.name}</h4>
-                  <p className="text-[10px] text-zinc-400 mt-1 max-w-[180px]">{activeChat.description || 'No description provided.'}</p>
-                </div>
-
-                {/* Members list */}
-                <div className="py-6">
-                  {activeChat.members?.find(m => m.id === user.id)?.role === 'admin' && (
+              {isGroup ? (
+                // GROUP INFO SIDEBAR
+                <div>
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Group Info</h3>
                     <button
-                      onClick={() => setShowAddMemberModal(true)}
-                      className="w-full mb-4 py-2 px-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5"
+                      onClick={() => setShowGroupInfo(false)}
+                      className="p-1 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition"
                     >
-                      <Plus className="h-4 w-4" /> Add Member
+                      <X className="h-5 w-5" />
                     </button>
-                  )}
-                  <h5 className="text-[10px] uppercase font-bold tracking-wider text-zinc-500 mb-3">Members ({activeChat.members?.length || 0})</h5>
-                  <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-                    {activeChat.members?.map(member => (
-                      <div key={member.id} className="flex items-center justify-between py-1">
-                        <div className="flex items-center gap-2 min-w-0">
-                          {member.avatarUrl ? (
-                            <img src={member.avatarUrl} alt={member.displayName} className="h-7 w-7 rounded-full object-cover" />
-                          ) : (
-                            <div className="h-7 w-7 rounded-full bg-zinc-800 flex items-center justify-center text-[9px] font-bold text-zinc-300 uppercase">
-                              {getInitials(member.displayName)}
-                            </div>
-                          )}
-                          <div className="min-w-0">
-                            <span className="text-xs font-semibold text-white truncate block">{member.displayName}</span>
-                          </div>
-                        </div>
-                        
-                        <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-md ${
-                          member.role === 'admin' 
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                            : 'bg-zinc-800 text-zinc-400'
-                        }`}>
-                          {member.role}
-                        </span>
+                  </div>
+
+                  {/* Group Details */}
+                  <div className="flex flex-col items-center text-center pb-6 border-b border-zinc-850">
+                    {activeChat.avatarUrl ? (
+                      <img src={getAvatarUrl(activeChat.avatarUrl)} alt="Group" className="h-16 w-16 rounded-full object-cover border border-zinc-800" />
+                    ) : (
+                      <div className="h-16 w-16 rounded-full bg-gradient-to-tr from-emerald-500/20 to-emerald-500/10 border border-zinc-800 flex items-center justify-center text-emerald-400 font-bold text-lg">
+                        <Users2 className="h-8 w-8" />
                       </div>
-                    ))}
+                    )}
+                    <h4 className="text-sm font-bold text-white mt-3 leading-tight">{activeChat.name}</h4>
+                    <p className="text-[10px] text-zinc-400 mt-1 max-w-[180px]">{activeChat.description || 'No description provided.'}</p>
+                  </div>
+
+                  {/* Members list */}
+                  <div className="py-6">
+                    {activeChat.members?.find(m => m.id === user.id)?.role === 'admin' && (
+                      <button
+                        onClick={() => setShowAddMemberModal(true)}
+                        className="w-full mb-4 py-2 px-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5"
+                      >
+                        <Plus className="h-4 w-4" /> Add Member
+                      </button>
+                    )}
+                    <h5 className="text-[10px] uppercase font-bold tracking-wider text-zinc-500 mb-3">Members ({activeChat.members?.length || 0})</h5>
+                    <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                      {activeChat.members?.map(member => (
+                        <div key={member.id} className="flex items-center justify-between py-1">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {member.avatarUrl ? (
+                              <img src={getAvatarUrl(member.avatarUrl)} alt={member.displayName} className="h-7 w-7 rounded-full object-cover" />
+                            ) : (
+                              <div className="h-7 w-7 rounded-full bg-zinc-800 flex items-center justify-center text-[9px] font-bold text-zinc-300 uppercase">
+                                {getInitials(member.displayName)}
+                              </div>
+                            )}
+                            <div className="min-w-0">
+                              <span className="text-xs font-semibold text-white truncate block">{member.displayName}</span>
+                            </div>
+                          </div>
+
+                          <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-md ${member.role === 'admin'
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            : 'bg-zinc-800 text-zinc-400'
+                            }`}>
+                            {member.role}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-zinc-850">
+                    <button
+                      onClick={() => {
+                        if (confirm('Are you sure you want to leave this group chat?')) {
+                          leaveGroup(activeChat.id);
+                          setShowGroupInfo(false);
+                        }
+                      }}
+                      className="w-full py-2.5 px-4 bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5"
+                    >
+                      <LogOut className="h-4 w-4" /> Leave Group Channel
+                    </button>
                   </div>
                 </div>
-              </div>
+              ) : (
+                // FRIEND PROFILE SIDEBAR
+                <div className="flex flex-col h-full justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="text-sm font-bold text-white uppercase tracking-wider">Friend Profile</h3>
+                      <button
+                        onClick={() => setShowGroupInfo(false)}
+                        className="p-1 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition"
+                      >
+                        <X className="h-5 w-5" />
+                      </button>
+                    </div>
 
-              {/* Leave group button */}
-              <button
-                onClick={() => {
-                  if (confirm('Are you sure you want to leave this group chat?')) {
-                    leaveGroup(activeChat.id);
-                    setShowGroupInfo(false);
-                  }
-                }}
-                className="w-full py-2.5 px-4 bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5"
-              >
-                <LogOut className="h-4 w-4" /> Leave Group Channel
-              </button>
+                    {/* Centered Avatar and Name */}
+                    <div className="flex flex-col items-center text-center pb-6 border-b border-zinc-850">
+                      <div className="relative">
+                        {activeChat.avatarUrl ? (
+                          <img src={getAvatarUrl(activeChat.avatarUrl)} alt={activeChat.displayName} className="h-20 w-20 rounded-full object-cover border-2 border-zinc-800 shadow-xl" />
+                        ) : (
+                          <div className="h-20 w-20 rounded-full bg-gradient-to-tr from-emerald-500/20 to-emerald-500/10 border-2 border-zinc-800 flex items-center justify-center text-emerald-400 font-bold text-2xl uppercase shadow-xl">
+                            {getInitials(activeChat.displayName)}
+                          </div>
+                        )}
+                        {activeChat.status === 'online' && (
+                          <span className="absolute bottom-0 right-0 h-4 w-4 bg-emerald-500 border-4 border-zinc-900 rounded-full animate-pulse"></span>
+                        )}
+                      </div>
+                      <h4 className="text-base font-bold text-white mt-4 leading-tight">{activeChat.displayName}</h4>
+                      <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full mt-2 inline-block ${activeChat.status === 'online'
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/15'
+                        : 'bg-zinc-800 text-zinc-450 border border-zinc-750'
+                        }`}>
+                        {activeChat.status === 'online' ? 'Active now' : 'Offline'}
+                      </span>
+                    </div>
+
+                    {/* Detailed Metadata fields */}
+                    <div className="py-6 space-y-5">
+                      {/* Email address */}
+                      <div className="space-y-1">
+                        <span className="text-[10px] uppercase font-bold text-zinc-550 flex items-center gap-1.5">
+                          <Mail className="h-3.5 w-3.5 text-zinc-450" /> Email Address
+                        </span>
+                        <span className="text-xs text-zinc-200 block bg-zinc-950/30 border border-zinc-850/50 p-2.5 rounded-xl break-all">
+                          {activeChat.email || 'N/A'}
+                        </span>
+                      </div>
+
+                      {/* Bio Status */}
+                      <div className="space-y-1">
+                        <span className="text-[10px] uppercase font-bold text-zinc-550 flex items-center gap-1.5">
+                          <User className="h-3.5 w-3.5 text-zinc-450" /> Personal Bio
+                        </span>
+                        <p className="text-xs text-zinc-300 bg-zinc-950/30 border border-zinc-850/50 p-2.5 rounded-xl leading-relaxed whitespace-pre-wrap">
+                          {activeChat.bio || 'Hey there! I am using Talkzen.'}
+                        </p>
+                      </div>
+
+                      {/* Last Seen indicator */}
+                      {activeChat.status !== 'online' && activeChat.lastSeen && (
+                        <div className="space-y-1">
+                          <span className="text-[10px] uppercase font-bold text-zinc-550 flex items-center gap-1.5">
+                            <Calendar className="h-3.5 w-3.5 text-zinc-450" /> Last Active
+                          </span>
+                          <span className="text-xs text-zinc-400 block bg-zinc-950/30 border border-zinc-850/50 p-2.5 rounded-xl font-mono">
+                            {new Date(activeChat.lastSeen).toLocaleDateString()} at {formatTime(activeChat.lastSeen)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* ── Chat Action Buttons ── */}
+                  <div className="pt-5 border-t border-zinc-800/60 space-y-2">
+                    <h5 className="text-[10px] uppercase font-bold tracking-wider text-zinc-500 mb-3">Chat Actions</h5>
+
+                    {/* Pin / Unpin */}
+                    <button
+                      onClick={() => {
+                        if (activeChat.isPinned) unpinChatAction(activeChat.id);
+                        else pinChatAction(activeChat.id);
+                        setShowGroupInfo(false);
+                      }}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-zinc-800/40 hover:bg-zinc-800 text-zinc-300 hover:text-white transition text-xs font-medium"
+                    >
+                      {activeChat.isPinned
+                        ? <><PinOff className="h-4 w-4 text-zinc-400 flex-shrink-0" /> Unpin Chat</>
+                        : <><Pin className="h-4 w-4 text-emerald-400 rotate-45 flex-shrink-0" /> Pin Chat</>}
+                    </button>
+
+                    {/* Block / Unblock */}
+                    <button
+                      onClick={() => setConfirmAction({ type: activeChat.isBlocked ? 'unblock' : 'block', friendId: activeChat.id, friendName: activeChat.displayName })}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-zinc-800/40 hover:bg-amber-500/10 text-zinc-300 hover:text-amber-400 transition text-xs font-medium"
+                    >
+                      <Ban className="h-4 w-4 text-amber-500 flex-shrink-0" />
+                      {activeChat.isBlocked ? 'Unblock User' : 'Block User'}
+                    </button>
+
+                    {/* Remove Chat */}
+                    <button
+                      onClick={() => setConfirmAction({ type: 'removeChat', friendId: activeChat.id, friendName: activeChat.displayName })}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-zinc-800/40 hover:bg-zinc-800 text-zinc-300 hover:text-white transition text-xs font-medium"
+                    >
+                      <EyeOff className="h-4 w-4 text-zinc-400 flex-shrink-0" />
+                      Remove Chat
+                    </button>
+
+                    {/* Remove Friend */}
+                    <button
+                      onClick={() => setConfirmAction({ type: 'removeFriendship', friendId: activeChat.id, friendName: activeChat.displayName })}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-rose-500/5 hover:bg-rose-500/15 text-rose-400 hover:text-rose-300 transition text-xs font-medium border border-rose-500/10"
+                    >
+                      <UserMinus className="h-4 w-4 text-rose-500 flex-shrink-0" />
+                      Remove Friend
+                    </button>
+                  </div>
+
+                  {/* Close connection indicator */}
+                  <div className="pt-4 border-t border-zinc-850 text-center mt-4">
+                    <span className="text-[9px] uppercase tracking-widest text-zinc-650 font-bold block">
+                      End-to-End Encrypted Session
+                    </span>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ================= CHAT ACTION CONFIRM MODAL ================= */}
+      <AnimatePresence>
+        {confirmAction && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.92, opacity: 0 }}
+              className="w-full max-w-sm p-6 bg-zinc-900 border border-zinc-800 rounded-3xl shadow-2xl"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                {confirmAction.type === 'block' && <Ban className="h-5 w-5 text-amber-500" />}
+                {confirmAction.type === 'unblock' && <Ban className="h-5 w-5 text-emerald-500" />}
+                {confirmAction.type === 'removeChat' && <EyeOff className="h-5 w-5 text-zinc-400" />}
+                {confirmAction.type === 'removeFriendship' && <UserMinus className="h-5 w-5 text-rose-500" />}
+                <h3 className="text-sm font-bold text-white">
+                  {confirmAction.type === 'block' && 'Block User'}
+                  {confirmAction.type === 'unblock' && 'Unblock User'}
+                  {confirmAction.type === 'removeChat' && 'Remove Chat'}
+                  {confirmAction.type === 'removeFriendship' && 'Remove Friend'}
+                </h3>
+              </div>
+              <p className="text-xs text-zinc-400 mb-6 leading-relaxed">
+                {confirmAction.type === 'block' && `Are you sure you want to block ${confirmAction.friendName}? You will no longer receive messages from them.`}
+                {confirmAction.type === 'unblock' && `Are you sure you want to unblock ${confirmAction.friendName}?`}
+                {confirmAction.type === 'removeChat' && `Remove the chat history with ${confirmAction.friendName} from your sidebar?`}
+                {confirmAction.type === 'removeFriendship' && `Remove ${confirmAction.friendName} from your friends list? This will also delete your chat history.`}
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setConfirmAction(null)}
+                  className="flex-1 py-2.5 px-4 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-semibold rounded-xl text-xs transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmChatAction}
+                  className={`flex-1 py-2.5 px-4 font-semibold rounded-xl text-xs transition ${confirmAction.type === 'removeFriendship' || confirmAction.type === 'block'
+                    ? 'bg-rose-500 hover:bg-rose-400 text-white'
+                    : 'bg-emerald-500 hover:bg-emerald-400 text-zinc-950'
+                    }`}
+                >
+                  Confirm
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
@@ -1210,13 +1501,13 @@ function ChatWindow() {
       <AnimatePresence>
         {showAddMemberModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-            <motion.div 
+            <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
               className="w-full max-w-sm p-6 bg-zinc-900 border border-zinc-800 rounded-3xl shadow-2xl relative"
             >
-              <button 
+              <button
                 onClick={() => {
                   setShowAddMemberModal(false);
                   setSelectedFriendsToGroup([]);
@@ -1225,7 +1516,7 @@ function ChatWindow() {
               >
                 <X className="h-4 w-4" />
               </button>
-              
+
               <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
                 <Users2 className="h-5 w-5 text-emerald-400" /> Add Members to Group
               </h3>
@@ -1238,36 +1529,36 @@ function ChatWindow() {
                       .filter(f => f.friendshipStatus === 'accepted')
                       .filter(f => !activeChat.members?.some(m => m.id === f.id))
                       .map(friend => {
-                         const isChecked = selectedFriendsToGroup.includes(friend.id);
-                         return (
-                           <div 
-                             key={friend.id} 
-                             onClick={() => {
-                               setSelectedFriendsToGroup(prev => 
-                                 prev.includes(friend.id) 
-                                   ? prev.filter(id => id !== friend.id) 
-                                   : [...prev, friend.id]
-                               );
-                             }}
-                             className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-zinc-850 cursor-pointer text-left transition"
-                           >
-                             <input 
-                               type="checkbox" 
-                               checked={isChecked}
-                               readOnly
-                               className="accent-emerald-500 h-4 w-4 rounded border-zinc-750 bg-zinc-950" 
-                             />
-                             {friend.avatarUrl ? (
-                               <img src={friend.avatarUrl} alt={friend.displayName} className="h-6 w-6 rounded-full object-cover" />
-                             ) : (
-                               <div className="h-6 w-6 rounded-full bg-zinc-800 flex items-center justify-center text-[8px] font-bold text-zinc-400 uppercase">
-                                 {getInitials(friend.displayName)}
-                               </div>
-                             )}
-                             <span className="text-xs font-medium text-zinc-200">{friend.displayName}</span>
-                           </div>
-                         );
-                       })}
+                        const isChecked = selectedFriendsToGroup.includes(friend.id);
+                        return (
+                          <div
+                            key={friend.id}
+                            onClick={() => {
+                              setSelectedFriendsToGroup(prev =>
+                                prev.includes(friend.id)
+                                  ? prev.filter(id => id !== friend.id)
+                                  : [...prev, friend.id]
+                              );
+                            }}
+                            className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-zinc-850 cursor-pointer text-left transition"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              readOnly
+                              className="accent-emerald-500 h-4 w-4 rounded border-zinc-750 bg-zinc-950"
+                            />
+                            {friend.avatarUrl ? (
+                              <img src={getAvatarUrl(friend.avatarUrl)} alt={friend.displayName} className="h-6 w-6 rounded-full object-cover" />
+                            ) : (
+                              <div className="h-6 w-6 rounded-full bg-zinc-800 flex items-center justify-center text-[8px] font-bold text-zinc-400 uppercase">
+                                {getInitials(friend.displayName)}
+                              </div>
+                            )}
+                            <span className="text-xs font-medium text-zinc-200">{friend.displayName}</span>
+                          </div>
+                        );
+                      })}
 
                     {friends.filter(f => f.friendshipStatus === 'accepted').filter(f => !activeChat.members?.some(m => m.id === f.id)).length === 0 && (
                       <div className="text-center py-6 text-zinc-500 text-xs">All active friends are already members of this group.</div>

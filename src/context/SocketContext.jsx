@@ -1,27 +1,28 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
-import { API_BASE_URL as socketUrl } from '../config/api.js';
+
+const socketUrl = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
 
 const SocketContext = createContext(null);
 
 export function SocketProvider({ children }) {
-  const { accessToken } = useAuth();
+  const { accessToken, apiBase, loading } = useAuth();
   const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    if (!accessToken) {
+    if (loading || !accessToken) {
       if (socket) {
         socket.disconnect();
         setSocket(null);
-        setConnected(false);
+        connected && setConnected(false);
       }
       return;
     }
 
-    // Connect to Socket.IO using absolute URL if defined (important for mobile), else relative path
-    const newSocket = io(socketUrl || undefined, {
+    // Connect to Socket.IO using dynamically resolved absolute URL
+    const newSocket = io(apiBase || undefined, {
       auth: {
         token: accessToken
       },
@@ -49,7 +50,7 @@ export function SocketProvider({ children }) {
     return () => {
       newSocket.disconnect();
     };
-  }, [accessToken]);
+  }, [accessToken, loading, apiBase]);
 
   return (
     <SocketContext.Provider value={{ socket, connected }}>

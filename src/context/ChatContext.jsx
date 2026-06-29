@@ -5,7 +5,7 @@ import { useSocket } from './SocketContext';
 const ChatContext = createContext(null);
 
 export function ChatProvider({ children }) {
-  const { user, apiFetch, accessToken, handleResponse } = useAuth();
+  const { user, apiFetch, accessToken, handleResponse, loading } = useAuth();
   const { socket, connected } = useSocket();
 
   const [friends, setFriends] = useState([]);
@@ -17,14 +17,69 @@ export function ChatProvider({ children }) {
   const [onlineUsers, setOnlineUsers] = useState(new Set());
   const [replyingTo, setReplyingTo] = useState(null);
   
-  // Custom sound triggers
-  const sendSound = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/2357/2357-84.wav'));
-  const receiveSound = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/2633/2633-84.wav'));
-  
-  // Volume adjustments
-  useEffect(() => {
-    sendSound.current.volume = 0.3;
-    receiveSound.current.volume = 0.35;
+  const playSynthesizedChime = useCallback((type) => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      
+      const ctx = new AudioCtx();
+      
+      if (type === 'send') {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(600, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.08);
+        gain.gain.setValueAtTime(0.04, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.08);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.08);
+      } else if (type === 'message') {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(659.25, ctx.currentTime); // E5
+        osc.frequency.setValueAtTime(880.00, ctx.currentTime + 0.08); // A5
+        gain.gain.setValueAtTime(0.05, ctx.currentTime);
+        gain.gain.setValueAtTime(0.05, ctx.currentTime + 0.08);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.25);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.25);
+      } else if (type === 'friend') {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
+        osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.08); // E5
+        osc.frequency.setValueAtTime(783.99, ctx.currentTime + 0.16); // G5
+        gain.gain.setValueAtTime(0.06, ctx.currentTime);
+        gain.gain.setValueAtTime(0.06, ctx.currentTime + 0.16);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.35);
+      } else if (type === 'group') {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(783.99, ctx.currentTime); // G5
+        osc.frequency.setValueAtTime(587.33, ctx.currentTime + 0.1); // D5
+        osc.frequency.exponentialRampToValueAtTime(659.25, ctx.currentTime + 0.2); // E5
+        gain.gain.setValueAtTime(0.05, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.3);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.3);
+      }
+    } catch (e) {
+      console.warn('Synthesizer play failed:', e);
+    }
   }, []);
 
   // Helper to determine chatId for 1-to-1 chat between two users
@@ -83,6 +138,8 @@ export function ChatProvider({ children }) {
 
   // Triggered on login/initial mount
   useEffect(() => {
+    if (loading) return; // Wait until backend URL resolution and token refresh are done!
+
     if (user) {
       loadFriends();
       loadGroups();
@@ -97,7 +154,7 @@ export function ChatProvider({ children }) {
       setOnlineUsers(new Set());
       setReplyingTo(null);
     }
-  }, [user, loadFriends, loadGroups, loadStories]);
+  }, [user, loading, loadFriends, loadGroups, loadStories]);
 
   // Retrieve chat history when active chat changes
   const loadChatHistory = useCallback(async (chatId) => {
@@ -118,10 +175,10 @@ export function ChatProvider({ children }) {
     }
   }, [apiFetch, socket, activeChat, handleResponse]);
 
-  const selectChat = useCallback(async (chat) => {
-    setActiveChat(chat);
+  const selectChat = useCallback((chat) => {
     if (!chat) {
       setMessages([]);
+      setActiveChat(null);
       return;
     }
 
@@ -129,18 +186,29 @@ export function ChatProvider({ children }) {
     const chatId = isGroup ? chat.id : get1to1ChatId(user.id, chat.id);
     loadChatHistory(chatId);
 
-    // If this is a group, asynchronously fetch the full group info to get the member roster
+    // Clear unread count for selected chat in friends/groups lists
     if (isGroup) {
-      try {
-        const response = await apiFetch(`/api/chat/groups/${chat.id}`);
-        const detailedGroup = await handleResponse(response);
-        // Ensure we preserve the groupId and state mapping
-        setActiveChat({ ...detailedGroup, groupId: detailedGroup.id });
-      } catch (err) {
-        console.error('Failed to load group roster:', err);
-      }
+      setGroups(prev => prev.map(g => g.id === chat.id ? { ...g, unreadCount: 0 } : g));
+    } else {
+      setFriends(prev => prev.map(f => f.id === chat.id ? { ...f, unreadCount: 0 } : f));
     }
-  }, [user, apiFetch, get1to1ChatId, loadChatHistory, handleResponse]);
+
+    // Set active chat
+    if (isGroup) {
+      // If this is a group, asynchronously fetch the full group info to get the member roster
+      apiFetch(`/api/chat/groups/${chat.id}`)
+        .then(response => handleResponse(response))
+        .then(detailedGroup => {
+          setActiveChat({ ...detailedGroup, groupId: detailedGroup.id, unreadCount: 0 });
+        })
+        .catch(err => {
+          console.error('Failed to load group roster:', err);
+          setActiveChat({ ...chat, unreadCount: 0 });
+        });
+    } else {
+      setActiveChat({ ...chat, unreadCount: 0 });
+    }
+  }, [user, apiFetch, get1to1ChatId, loadChatHistory, handleResponse, setGroups, setFriends]);
 
   // Send a text message
   const sendMessage = useCallback((content, type = 'text') => {
@@ -160,7 +228,7 @@ export function ChatProvider({ children }) {
     };
 
     // Play send audio
-    sendSound.current.cloneNode(true).play().catch(() => {});
+    playSynthesizedChime('send');
 
     socket.emit('send_message', messagePayload, (savedMsg) => {
       if (savedMsg.error) {
@@ -208,7 +276,7 @@ export function ChatProvider({ children }) {
     };
 
     // Play send audio
-    sendSound.current.cloneNode(true).play().catch(() => {});
+    playSynthesizedChime('send');
 
     socket.emit('send_message', messagePayload, (savedMsg) => {
       if (savedMsg.error) {
@@ -465,6 +533,110 @@ export function ChatProvider({ children }) {
     });
   }, [socket, activeChat, user, get1to1ChatId]);
 
+  // ---- Chat Settings Functions ----
+
+  // Pin a chat (persisted server-side)
+  const pinChatAction = useCallback(async (friendId) => {
+    try {
+      const response = await apiFetch('/api/users/chat/pin', {
+        method: 'POST',
+        body: JSON.stringify({ friendId })
+      });
+      if (response.ok) {
+        setFriends(prev => prev.map(f => f.id === friendId ? { ...f, isPinned: true } : f));
+      }
+    } catch (err) {
+      console.error('Error pinning chat:', err);
+    }
+  }, [apiFetch]);
+
+  // Unpin a chat
+  const unpinChatAction = useCallback(async (friendId) => {
+    try {
+      const response = await apiFetch('/api/users/chat/unpin', {
+        method: 'POST',
+        body: JSON.stringify({ friendId })
+      });
+      if (response.ok) {
+        setFriends(prev => prev.map(f => f.id === friendId ? { ...f, isPinned: false } : f));
+      }
+    } catch (err) {
+      console.error('Error unpinning chat:', err);
+    }
+  }, [apiFetch]);
+
+  // Block a user
+  const blockUserAction = useCallback(async (friendId) => {
+    try {
+      const response = await apiFetch('/api/users/block', {
+        method: 'POST',
+        body: JSON.stringify({ blockedId: friendId })
+      });
+      if (response.ok) {
+        setFriends(prev => prev.map(f => f.id === friendId ? { ...f, isBlocked: true } : f));
+        // If we have this user as active chat, deselect
+        if (activeChat && activeChat.id === friendId) {
+          selectChat(null);
+        }
+      }
+    } catch (err) {
+      console.error('Error blocking user:', err);
+    }
+  }, [apiFetch, activeChat, selectChat]);
+
+  // Unblock a user
+  const unblockUserAction = useCallback(async (friendId) => {
+    try {
+      const response = await apiFetch('/api/users/unblock', {
+        method: 'POST',
+        body: JSON.stringify({ blockedId: friendId })
+      });
+      if (response.ok) {
+        setFriends(prev => prev.map(f => f.id === friendId ? { ...f, isBlocked: false } : f));
+      }
+    } catch (err) {
+      console.error('Error unblocking user:', err);
+    }
+  }, [apiFetch]);
+
+  // Hide chat (remove from sidebar without deleting friendship)
+  const hideChatAction = useCallback(async (friendId) => {
+    try {
+      const response = await apiFetch('/api/users/chat/hide', {
+        method: 'POST',
+        body: JSON.stringify({ friendId })
+      });
+      if (response.ok) {
+        setFriends(prev => prev.map(f => f.id === friendId ? { ...f, isHidden: true, isPinned: false } : f));
+        // Deselect if this is the active chat
+        if (activeChat && activeChat.id === friendId) {
+          selectChat(null);
+        }
+      }
+    } catch (err) {
+      console.error('Error hiding chat:', err);
+    }
+  }, [apiFetch, activeChat, selectChat]);
+
+  // Remove friendship entirely
+  const removeFriendshipAction = useCallback(async (friendId) => {
+    try {
+      const response = await apiFetch('/api/users/friends/remove', {
+        method: 'DELETE',
+        body: JSON.stringify({ friendId })
+      });
+      if (response.ok) {
+        setFriends(prev => prev.filter(f => f.id !== friendId));
+        // Deselect if this is the active chat
+        if (activeChat && activeChat.id === friendId) {
+          selectChat(null);
+        }
+      }
+    } catch (err) {
+      console.error('Error removing friendship:', err);
+    }
+  }, [apiFetch, activeChat, selectChat]);
+
   // Setup Real-time socket event bindings
   useEffect(() => {
     if (!socket) return;
@@ -479,9 +651,11 @@ export function ChatProvider({ children }) {
         ? (activeChat.groupId ? activeChat.id : get1to1ChatId(user.id, activeChat.id))
         : null;
 
-      if (currentChatId === msgChatId) {
+      const isUnread = currentChatId !== msgChatId;
+
+      if (!isUnread) {
         // Play receive audio
-        receiveSound.current.cloneNode(true).play().catch(() => {});
+        playSynthesizedChime('message');
 
         setMessages(prev => [...prev, msg]);
         
@@ -491,16 +665,22 @@ export function ChatProvider({ children }) {
         }
       } else {
         // Play receive sound for background chats as well
-        receiveSound.current.cloneNode(true).play().catch(() => {});
-        
-        // Optional: show local Toast notification or increment unread counts
+        playSynthesizedChime('message');
       }
 
-      // Update previews in list
+      // Update previews in list and increment unread count if background chat
       if (isGroup) {
-        setGroups(prev => prev.map(g => g.id === msg.groupId ? { ...g, lastMessage: msg } : g));
+        setGroups(prev => prev.map(g => g.id === msg.groupId ? { 
+          ...g, 
+          lastMessage: msg,
+          unreadCount: isUnread ? (g.unreadCount || 0) + 1 : 0
+        } : g));
       } else {
-        setFriends(prev => prev.map(f => f.id === msg.senderId || f.id === msg.receiverId ? { ...f, lastMessage: msg } : f));
+        setFriends(prev => prev.map(f => f.id === msg.senderId || f.id === msg.receiverId ? { 
+          ...f, 
+          lastMessage: msg,
+          unreadCount: isUnread && f.id === msg.senderId ? (f.unreadCount || 0) + 1 : f.unreadCount
+        } : f));
       }
     };
 
@@ -520,11 +700,26 @@ export function ChatProvider({ children }) {
     // C: Status updates (delivered checkmarks)
     const handleMessageStatusUpdate = ({ messageId, chatId, status }) => {
       setMessages(prev => prev.map(m => m.id === messageId ? { ...m, status } : m));
+      // Also update lastMessage status in friends list
+      setFriends(prev => prev.map(f => {
+        if (f.lastMessage && f.lastMessage.id === messageId) {
+          return { ...f, lastMessage: { ...f.lastMessage, status } };
+        }
+        return f;
+      }));
     };
 
     // D: Read status sync (blue double checkmarks!)
     const handleMessagesRead = ({ chatId, readerId }) => {
       setMessages(prev => prev.map(m => m.chatId === chatId && m.senderId === user.id ? { ...m, status: 'read' } : m));
+      // Also update lastMessage status in friends list
+      setFriends(prev => prev.map(f => {
+        const fChatId = [user.id, f.id].sort().join('_');
+        if (fChatId === chatId && f.lastMessage && f.lastMessage.senderId === user.id) {
+          return { ...f, lastMessage: { ...f.lastMessage, status: 'read' } };
+        }
+        return f;
+      }));
     };
 
     // E: Friend online status changes
@@ -549,12 +744,12 @@ export function ChatProvider({ children }) {
 
     // F: Friend requests and acceptances in real-time
     const handleFriendRequest = ({ sender }) => {
-      receiveSound.current.cloneNode(true).play().catch(() => {});
+      playSynthesizedChime('friend');
       loadFriends();
     };
 
     const handleFriendAccept = ({ friend }) => {
-      receiveSound.current.cloneNode(true).play().catch(() => {});
+      playSynthesizedChime('friend');
       loadFriends();
       loadStories();
     };
@@ -570,7 +765,7 @@ export function ChatProvider({ children }) {
         if (prev.some(g => g.id === mappedGroup.id)) return prev;
         return [mappedGroup, ...prev];
       });
-      receiveSound.current.cloneNode(true).play().catch(() => {});
+      playSynthesizedChime('group');
     };
 
     const handleMessageEdited = ({ messageId, content }) => {
@@ -657,6 +852,12 @@ export function ChatProvider({ children }) {
     deleteMessage,
     pinMessage,
     reactMessage,
+    pinChatAction,
+    unpinChatAction,
+    blockUserAction,
+    unblockUserAction,
+    hideChatAction,
+    removeFriendshipAction,
   };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

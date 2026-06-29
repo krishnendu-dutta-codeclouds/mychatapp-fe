@@ -4,15 +4,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, KeyRound, ArrowRight, Sparkles, User, FileText } from 'lucide-react';
 
 function AuthScreen() {
-  const { 
-    requestOtp, 
-    verifyOtp, 
-    loginWithGoogle, 
-    loginWithPassword, 
-    registerWithPassword, 
-    verify2fa 
+  const {
+    requestOtp,
+    verifyOtp,
+    loginWithGoogle,
+    loginWithPassword,
+    registerWithPassword,
+    verify2fa
   } = useAuth();
-  
+
   const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
   const [loginType, setLoginType] = useState('otp'); // 'otp' | 'password'
   const [email, setEmail] = useState('');
@@ -85,7 +85,7 @@ function AuthScreen() {
         await verify2fa(email, otp);
       } else {
         if (authMode === 'register') {
-          await verifyOtp(email, otp, displayName.trim(), bio.trim() || 'Hey there! I am using Secure Chat.');
+          await verifyOtp(email, otp, displayName.trim(), bio.trim() || 'Hey there! I am using Talkzen.');
         } else {
           await verifyOtp(email, otp);
         }
@@ -130,7 +130,7 @@ function AuthScreen() {
 
       <div className="relative z-10 flex flex-col items-center">
         {/* Logo/Icon */}
-        <motion.div 
+        <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ type: "spring", stiffness: 200 }}
@@ -140,26 +140,26 @@ function AuthScreen() {
         </motion.div>
 
         <h2 className="text-2xl font-bold tracking-tight text-white font-sans text-center">
-          {step === 2 
-            ? is2faFlow 
+          {step === 2
+            ? is2faFlow
               ? 'Two-Factor Verification'
-              : 'Confirm your Identity' 
-            : authMode === 'login' 
-              ? 'Welcome to Secure Chat' 
+              : 'Confirm your Identity'
+            : authMode === 'login'
+              ? 'Welcome to Talkzen'
               : 'Create an Account'
           }
         </h2>
         <p className="mt-2 text-sm text-zinc-400 text-center max-w-[280px]">
-          {step === 2 
+          {step === 2
             ? `We've sent a 6-digit code to ${email}.`
             : authMode === 'login'
-              ? 'Sign in using verification code or password credentials.' 
+              ? 'Sign in using verification code or password credentials.'
               : 'Enroll your details to register and open a secure mailbox.'
           }
         </p>
 
         {error && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: -5 }}
             animate={{ opacity: 1, y: 0 }}
             className="w-full mt-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400 text-center font-medium"
@@ -171,7 +171,7 @@ function AuthScreen() {
         <div className="w-full mt-6">
           <AnimatePresence mode="wait">
             {step === 1 ? (
-              <motion.form 
+              <motion.form
                 key={authMode}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -281,8 +281,8 @@ function AuthScreen() {
                     <div className="h-5 w-5 border-2 border-zinc-950/20 border-t-zinc-950 rounded-full animate-spin"></div>
                   ) : (
                     <>
-                      {authMode === 'login' 
-                        ? loginType === 'password' ? 'Sign In' : 'Request Verification' 
+                      {authMode === 'login'
+                        ? loginType === 'password' ? 'Sign In' : 'Request Verification'
                         : 'Register Account'
                       }
                       <ArrowRight className="h-4 w-4" />
@@ -297,8 +297,8 @@ function AuthScreen() {
                     onClick={toggleAuthMode}
                     className="text-xs text-emerald-400 hover:text-emerald-300 font-medium transition duration-200"
                   >
-                    {authMode === 'login' 
-                      ? "Don't have an account? Register here" 
+                    {authMode === 'login'
+                      ? "Don't have an account? Register here"
                       : "Already have an account? Sign in here"
                     }
                   </button>
@@ -339,7 +339,7 @@ function AuthScreen() {
                 </button>
               </motion.form>
             ) : (
-              <motion.form 
+              <motion.form
                 key="otp-form"
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}

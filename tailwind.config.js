@@ -9,6 +9,15 @@ export default {
     extend: {
       colors: {
         white: 'rgb(var(--color-white) / <alpha-value>)',
+        emerald: {
+          50: 'rgb(var(--theme-color-50) / <alpha-value>)',
+          100: 'rgb(var(--theme-color-100) / <alpha-value>)',
+          300: 'rgb(var(--theme-color-300) / <alpha-value>)',
+          400: 'rgb(var(--theme-color-400) / <alpha-value>)',
+          500: 'rgb(var(--theme-color-500) / <alpha-value>)',
+          600: 'rgb(var(--theme-color-600) / <alpha-value>)',
+          700: 'rgb(var(--theme-color-700) / <alpha-value>)',
+        },
         // Custom premium chat colors
         brand: {
           50: '#f0fdf4',

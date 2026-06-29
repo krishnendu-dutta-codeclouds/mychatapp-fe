@@ -16,7 +16,7 @@ const getInitials = (name) => {
 };
 
 export default function AdminDashboard({ onClose }) {
-  const { apiFetch, user: currentUser, handleResponse } = useAuth();
+  const { apiFetch, user: currentUser, handleResponse, getAvatarUrl } = useAuth();
   const { socket } = useChat();
 
   const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'users', 'chats', 'logs'
@@ -50,6 +50,83 @@ export default function AdminDashboard({ onClose }) {
   // System logs stream
   const [logs, setLogs] = useState([]);
   const logsEndRef = useRef(null);
+
+  // New administrative maintenance & broadcast states
+  const [broadcastMessage, setBroadcastMessage] = useState('');
+  const [broadcastSeverity, setBroadcastSeverity] = useState('info');
+  const [broadcastLoading, setBroadcastLoading] = useState(false);
+  const [broadcastFile, setBroadcastFile] = useState(null);
+  const fileInputRef = useRef(null);
+  const [maintenanceRunning, setMaintenanceRunning] = useState(false);
+  const [maintenanceResult, setMaintenanceResult] = useState(null);
+  const [maintenanceSuccess, setMaintenanceSuccess] = useState(true);
+
+  const formatBytes = (bytes) => {
+    if (!bytes) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const handleMaintenance = async (action) => {
+    setMaintenanceRunning(true);
+    setMaintenanceResult(null);
+    try {
+      const res = await apiFetch('/api/admin/maintenance', {
+        method: 'POST',
+        body: JSON.stringify({ action })
+      });
+      const data = await handleResponse(res);
+      setMaintenanceSuccess(true);
+      if (action === 'integrity_check') {
+        setMaintenanceResult(`Integrity Status: ${data.result}`);
+        addLog('System', `Database Integrity Check executed. Result: ${data.result}`);
+      } else {
+        setMaintenanceResult(`Vacuum completed. Database compressed.`);
+        addLog('System', `Database vacuum (compaction) completed successfully.`);
+        fetchStats(); // update db file size in stats
+      }
+    } catch (err) {
+      setMaintenanceSuccess(false);
+      setMaintenanceResult(err.message || 'Operation failed.');
+      addLog('System', `Database maintenance error: ${err.message || err}`);
+    } finally {
+      setMaintenanceRunning(false);
+    }
+  };
+
+  const handleBroadcast = async (e) => {
+    e.preventDefault();
+    if (!broadcastMessage.trim()) return;
+
+    setBroadcastLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append('message', broadcastMessage.trim());
+      formData.append('severity', broadcastSeverity);
+      if (broadcastFile) {
+        formData.append('media', broadcastFile);
+      }
+
+      const res = await apiFetch('/api/admin/broadcast', {
+        method: 'POST',
+        body: formData
+      });
+      await handleResponse(res);
+      addLog('Broadcast', `System alert broadcasted: "${broadcastMessage.trim()}"`);
+      setBroadcastMessage('');
+      setBroadcastFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      alert('Alert successfully broadcasted and published to status feed!');
+      fetchStats(); // Update dashboard counts
+    } catch (err) {
+      console.error(err);
+      alert(err.message || 'Failed to transmit broadcast alert.');
+    } finally {
+      setBroadcastLoading(false);
+    }
+  };
 
   // Load Initial Data
   const fetchStats = async () => {
@@ -294,7 +371,7 @@ export default function AdminDashboard({ onClose }) {
         <div>
           {/* Dashboard Title Header */}
           <div className="p-6 flex items-center gap-3 border-b border-zinc-800/60">
-            <div className="h-10 w-10 rounded-2xl bg-gradient-to-tr from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+            <div className="h-10 w-10 rounded-2xl bg-gradient-to-tr from-emerald-500/20 to-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
               <Shield className="h-5 w-5" />
             </div>
             <div>
@@ -469,95 +546,227 @@ export default function AdminDashboard({ onClose }) {
                   {/* System overview & charts */}
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     
-                    {/* Left: Server Infrastructure */}
-                    <div className="p-6 rounded-3xl bg-zinc-900/35 border border-zinc-800/80 backdrop-blur-md lg:col-span-1 space-y-4">
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-2">
-                        <Server className="h-4 w-4 text-emerald-400" /> Infrastructure Health
-                      </h3>
-                      
-                      <div className="space-y-3.5 mt-2">
-                        <div className="flex items-center justify-between border-b border-zinc-800/40 pb-2.5">
-                          <span className="text-xs text-zinc-400">Database Engine</span>
-                          <span className="text-xs font-bold text-emerald-400 flex items-center gap-1">
-                            <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full"></span> SQLite3 Local
-                          </span>
+                    {/* Left: Server Infrastructure & Maintenance */}
+                    <div className="space-y-6 lg:col-span-1">
+                      {/* Infrastructure Health */}
+                      <div className="p-6 rounded-3xl bg-zinc-900/35 border border-zinc-800/80 backdrop-blur-md space-y-4">
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-2">
+                          <Server className="h-4 w-4 text-emerald-400" /> Infrastructure Health
+                        </h3>
+                        
+                        <div className="space-y-3 mt-2">
+                          <div className="flex items-center justify-between border-b border-zinc-850 pb-2">
+                            <span className="text-[11px] text-zinc-400">Database Size</span>
+                            <span className="text-[11px] font-bold text-zinc-200">
+                              {stats.analytics?.dbSize ? formatBytes(stats.analytics.dbSize) : 'Unknown'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between border-b border-zinc-850 pb-2">
+                            <span className="text-[11px] text-zinc-400">Node Engine</span>
+                            <span className="text-[11px] font-mono font-bold text-zinc-200">
+                              {stats.analytics?.system?.nodeVersion || 'Unknown'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between border-b border-zinc-850 pb-2">
+                            <span className="text-[11px] text-zinc-400">Server Platform</span>
+                            <span className="text-[11px] font-mono text-zinc-200 uppercase">
+                              {stats.analytics?.system?.platform || 'Unknown'} ({stats.analytics?.system?.arch || ''})
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between border-b border-zinc-850 pb-2">
+                            <span className="text-[11px] text-zinc-400">Server RAM</span>
+                            <span className="text-[11px] font-mono text-zinc-200">
+                              {stats.analytics?.system?.heapUsed ? formatBytes(stats.analytics.system.heapUsed) : 'Unknown'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between border-b border-zinc-850 pb-2">
+                            <span className="text-[11px] text-zinc-400">Uptime</span>
+                            <span className="text-[11px] font-mono text-zinc-200">
+                              {Math.floor(stats.serverUptime / 3600)}h {Math.floor((stats.serverUptime % 3600) / 60)}m
+                            </span>
+                          </div>
                         </div>
-                        <div className="flex items-center justify-between border-b border-zinc-800/40 pb-2.5">
-                          <span className="text-xs text-zinc-400">API Gateway Status</span>
-                          <span className="text-xs font-bold text-emerald-400">Operational</span>
+                      </div>
+
+                      {/* SQLite Database Maintenance */}
+                      <div className="p-6 rounded-3xl bg-zinc-900/35 border border-zinc-800/80 backdrop-blur-md space-y-4">
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-2">
+                          <ShieldCheck className="h-4 w-4 text-emerald-400" /> DB Optimization
+                        </h3>
+                        
+                        <p className="text-[10px] text-zinc-500 leading-relaxed">
+                          Execute database procedures directly on the SQLite engine to guarantee database integrity and clean indices.
+                        </p>
+
+                        <div className="flex flex-col gap-2 mt-2">
+                          <button
+                            onClick={() => handleMaintenance('integrity_check')}
+                            disabled={maintenanceRunning}
+                            className="w-full py-2 bg-zinc-950 hover:bg-zinc-850 border border-zinc-800/60 rounded-xl text-[10px] font-bold text-zinc-300 hover:text-white transition flex items-center justify-center gap-2"
+                          >
+                            <ShieldAlert className="h-3.5 w-3.5 text-blue-400" />
+                            Verify DB Integrity
+                          </button>
+                          <button
+                            onClick={() => handleMaintenance('vacuum')}
+                            disabled={maintenanceRunning}
+                            className="w-full py-2 bg-zinc-950 hover:bg-zinc-850 border border-zinc-800/60 rounded-xl text-[10px] font-bold text-zinc-300 hover:text-white transition flex items-center justify-center gap-2"
+                          >
+                            <RefreshCw className={`h-3.5 w-3.5 text-emerald-400 ${maintenanceRunning ? 'animate-spin' : ''}`} />
+                            Vacuum & Compact DB
+                          </button>
                         </div>
-                        <div className="flex items-center justify-between border-b border-zinc-800/40 pb-2.5">
-                          <span className="text-xs text-zinc-400">Real-Time Engine</span>
-                          <span className="text-xs font-bold text-teal-400">Socket.IO Active</span>
-                        </div>
-                        <div className="flex items-center justify-between border-b border-zinc-800/40 pb-2.5">
-                          <span className="text-xs text-zinc-400">Uptime</span>
-                          <span className="text-xs font-mono text-zinc-200">
-                            {Math.floor(stats.serverUptime / 3600)}h {Math.floor((stats.serverUptime % 3600) / 60)}m
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-zinc-400">Security Layers</span>
-                          <span className="text-xs font-bold text-blue-400">JWT + requireAdmin</span>
-                        </div>
+
+                        {maintenanceResult && (
+                          <div className={`p-2.5 rounded-xl border text-[9px] font-mono leading-relaxed break-all ${
+                            maintenanceSuccess 
+                              ? 'bg-emerald-500/5 border-emerald-500/15 text-emerald-400' 
+                              : 'bg-red-500/5 border-red-500/15 text-red-400'
+                          }`}>
+                            {maintenanceResult}
+                          </div>
+                        )}
                       </div>
                     </div>
 
-                    {/* Right: Growth Analytics Charts */}
-                    <div className="p-6 rounded-3xl bg-zinc-900/35 border border-zinc-800/80 backdrop-blur-md lg:col-span-2 space-y-4">
-                      <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-2">
-                        <TrendingUp className="h-4 w-4 text-blue-400" /> Messaging & Traffic Analytics
-                      </h3>
-                      
-                      {/* Premium Custom SVG Chart */}
-                      <div className="h-48 w-full bg-zinc-950/30 border border-zinc-900 rounded-2xl flex items-center justify-center p-4 relative">
-                        <svg className="w-full h-full" viewBox="0 0 500 150">
-                          {/* Grid Lines */}
-                          <line x1="0" y1="37.5" x2="500" y2="37.5" stroke="#27272a" strokeWidth="0.5" strokeDasharray="4,4" />
-                          <line x1="0" y1="75" x2="500" y2="75" stroke="#27272a" strokeWidth="0.5" strokeDasharray="4,4" />
-                          <line x1="0" y1="112.5" x2="500" y2="112.5" stroke="#27272a" strokeWidth="0.5" strokeDasharray="4,4" />
-                          
-                          {/* Smooth gradient curve for activity */}
-                          <defs>
-                            <linearGradient id="chartGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                              <stop offset="0%" stopColor="#10b981" stopOpacity="0.18" />
-                              <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
-                            </linearGradient>
-                          </defs>
-                          
-                          {/* Area path */}
-                          <path
-                            d="M 0 150 Q 50 120 100 110 T 200 90 T 300 130 T 400 45 T 500 65 L 500 150 Z"
-                            fill="url(#chartGrad)"
-                          />
+                    {/* Middle/Right: Broadcast alerts & graphical breakdowns */}
+                    <div className="space-y-6 lg:col-span-2">
+                      {/* Real-time System Broadcast Panel */}
+                      <div className="p-6 rounded-3xl bg-zinc-900/35 border border-zinc-800/80 backdrop-blur-md space-y-4">
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-2">
+                          <MessageCircle className="h-4 w-4 text-emerald-400 animate-pulse" /> System Broadcast Transmission
+                        </h3>
+                        
+                        <p className="text-[10px] text-zinc-500 leading-relaxed">
+                          Broadcast a warning banner or service announcement to all active connections in real-time.
+                        </p>
 
-                          {/* Line path */}
-                          <path
-                            d="M 0 150 Q 50 120 100 110 T 200 90 T 300 130 T 400 45 T 500 65"
-                            fill="none"
-                            stroke="#10b981"
-                            strokeWidth="2.5"
-                            strokeLinecap="round"
+                        <form onSubmit={handleBroadcast} className="space-y-3.5 mt-2">
+                          <textarea
+                            value={broadcastMessage}
+                            onChange={(e) => setBroadcastMessage(e.target.value)}
+                            placeholder="Type broadcast message (e.g. Server under scheduled maintenance in 10 minutes...)"
+                            className="w-full h-16 p-3 bg-zinc-950/60 border border-zinc-850 rounded-2xl text-[11px] text-zinc-200 placeholder-zinc-650 focus:outline-none focus:border-emerald-500/50 resize-none leading-relaxed"
+                            required
                           />
-                          
-                          {/* Indicator dots */}
-                          <circle cx="400" cy="45" r="4" fill="#10b981" />
-                          <circle cx="500" cy="65" r="4" fill="#10b981" />
-                        </svg>
-
-                        <div className="absolute top-3 right-4 flex items-center gap-3">
-                          <span className="text-[9px] font-bold uppercase text-emerald-400 bg-emerald-500/10 border border-emerald-500/15 px-2 py-0.5 rounded-full flex items-center gap-1">
-                            <span className="h-1 w-1 bg-emerald-500 rounded-full animate-ping"></span> Real-time Network Log
-                          </span>
-                        </div>
+                          <div className="flex flex-col gap-1.5">
+                            <span className="text-[9px] uppercase font-bold text-zinc-500">Attach Broadcast Media (Optional - Posts to Status Feed):</span>
+                            <input 
+                              type="file"
+                              ref={fileInputRef}
+                              accept="image/*"
+                              onChange={(e) => setBroadcastFile(e.target.files?.[0] || null)}
+                              className="text-[10px] text-zinc-400 bg-zinc-950/40 border border-zinc-850 p-2 rounded-xl focus:outline-none file:mr-3 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-[9px] file:font-bold file:bg-zinc-800 file:text-zinc-200 file:hover:bg-zinc-700 hover:border-zinc-800 transition cursor-pointer"
+                            />
+                          </div>
+                          <div className="flex items-center justify-between gap-4">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[9px] uppercase font-bold text-zinc-500">Severity:</span>
+                              <select
+                                value={broadcastSeverity}
+                                onChange={(e) => setBroadcastSeverity(e.target.value)}
+                                className="bg-zinc-950 border border-zinc-850 text-zinc-300 text-[10px] px-2 py-1 rounded-lg focus:outline-none focus:border-emerald-500"
+                              >
+                                <option value="info">💡 Info</option>
+                                <option value="warning">⚠️ Warning</option>
+                                <option value="danger">🚨 Critical</option>
+                              </select>
+                            </div>
+                            <button
+                              type="submit"
+                              disabled={broadcastLoading || !broadcastMessage.trim()}
+                              className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-black text-[10px] font-bold rounded-xl transition shadow-lg shadow-emerald-500/10"
+                            >
+                              {broadcastLoading ? 'Broadcasting...' : 'Broadcast Transmission'}
+                            </button>
+                          </div>
+                        </form>
                       </div>
-                      
-                      <div className="flex items-center justify-between text-[10px] text-zinc-500 font-semibold px-2">
-                        <span>08:00 AM</span>
-                        <span>10:00 AM</span>
-                        <span>12:00 PM</span>
-                        <span>02:00 PM</span>
-                        <span>Active Monitoring</span>
+
+                      {/* Visual Analytics breakdowns */}
+                      <div className="p-6 rounded-3xl bg-zinc-900/35 border border-zinc-800/80 backdrop-blur-md space-y-4">
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-2">
+                          <TrendingUp className="h-4 w-4 text-blue-400" /> Analytical Distributions
+                        </h3>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                          {/* Role Distribution Bar */}
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between text-[9px] uppercase font-bold text-zinc-400">
+                              <span>Security Roles</span>
+                              <span className="text-zinc-300">
+                                {stats.analytics?.roles?.admin || 0} Admins / {stats.analytics?.roles?.user || 0} Users
+                              </span>
+                            </div>
+                            <div className="h-2 w-full bg-zinc-950 rounded-full overflow-hidden flex">
+                              <div 
+                                style={{ width: `${(stats.analytics?.roles?.admin || 0) / (stats.totalUsers || 1) * 100}%` }} 
+                                className="h-full bg-emerald-500"
+                              />
+                              <div 
+                                style={{ width: `${(stats.analytics?.roles?.user || 0) / (stats.totalUsers || 1) * 100}%` }} 
+                                className="h-full bg-zinc-700"
+                              />
+                            </div>
+                            <div className="flex justify-between text-[8px] text-zinc-500">
+                              <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 bg-emerald-500 rounded-full"></span> Admin</span>
+                              <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 bg-zinc-700 rounded-full"></span> Standard User</span>
+                            </div>
+                          </div>
+
+                          {/* Security Status Ban rate */}
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between text-[9px] uppercase font-bold text-zinc-400">
+                              <span>Account Status</span>
+                              <span className="text-zinc-300">
+                                {stats.analytics?.banned || 0} Suspended / {(stats.totalUsers || 0) - (stats.analytics?.banned || 0)} Active
+                              </span>
+                            </div>
+                            <div className="h-2 w-full bg-zinc-950 rounded-full overflow-hidden flex">
+                              <div 
+                                style={{ width: `${(stats.analytics?.banned || 0) / (stats.totalUsers || 1) * 100}%` }} 
+                                className="h-full bg-red-500"
+                              />
+                              <div 
+                                style={{ width: `${((stats.totalUsers || 0) - (stats.analytics?.banned || 0)) / (stats.totalUsers || 1) * 100}%` }} 
+                                className="h-full bg-emerald-500"
+                              />
+                            </div>
+                            <div className="flex justify-between text-[8px] text-zinc-500">
+                              <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 bg-red-500 rounded-full"></span> Banned</span>
+                              <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 bg-emerald-500 rounded-full"></span> Active</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Message Type Stacked Breakdown */}
+                        <div className="space-y-2 mt-4 pt-4 border-t border-zinc-800/40">
+                          <span className="text-[9px] uppercase font-bold text-zinc-400 block">Message Formats Distribution</span>
+                          
+                          {(() => {
+                            const mt = stats.analytics?.messageTypes || { text: 0, image: 0, video: 0, audio: 0, file: 0 };
+                            const sum = Object.values(mt).reduce((a, b) => a + b, 0) || 1;
+                            return (
+                              <div className="space-y-2">
+                                <div className="h-3 w-full bg-zinc-950 rounded-lg overflow-hidden flex">
+                                  <div style={{ width: `${mt.text / sum * 100}%` }} className="h-full bg-emerald-500" title={`Text: ${mt.text}`} />
+                                  <div style={{ width: `${mt.image / sum * 100}%` }} className="h-full bg-blue-500" title={`Images: ${mt.image}`} />
+                                  <div style={{ width: `${mt.video / sum * 100}%` }} className="h-full bg-red-500" title={`Videos: ${mt.video}`} />
+                                  <div style={{ width: `${mt.audio / sum * 100}%` }} className="h-full bg-purple-500" title={`Audio: ${mt.audio}`} />
+                                  <div style={{ width: `${mt.file / sum * 100}%` }} className="h-full bg-pink-500" title={`Files: ${mt.file}`} />
+                                </div>
+                                <div className="grid grid-cols-5 gap-1.5 text-[8px] text-zinc-500 leading-none">
+                                  <span className="truncate flex items-center gap-1"><span className="h-1.5 w-1.5 bg-emerald-500 rounded-full"></span> Text ({mt.text})</span>
+                                  <span className="truncate flex items-center gap-1"><span className="h-1.5 w-1.5 bg-blue-500 rounded-full"></span> Image ({mt.image})</span>
+                                  <span className="truncate flex items-center gap-1"><span className="h-1.5 w-1.5 bg-red-500 rounded-full"></span> Video ({mt.video})</span>
+                                  <span className="truncate flex items-center gap-1"><span className="h-1.5 w-1.5 bg-purple-500 rounded-full"></span> Audio ({mt.audio})</span>
+                                  <span className="truncate flex items-center gap-1"><span className="h-1.5 w-1.5 bg-pink-500 rounded-full"></span> File ({mt.file})</span>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+
                       </div>
                     </div>
 
@@ -625,7 +834,7 @@ export default function AdminDashboard({ onClose }) {
                                   <div className="flex items-center gap-3">
                                     {user.avatarUrl ? (
                                       <img 
-                                        src={user.avatarUrl} 
+                                        src={getAvatarUrl(user.avatarUrl)} 
                                         alt={user.displayName} 
                                         className="h-9 w-9 rounded-full object-cover border border-zinc-800" 
                                       />
@@ -777,7 +986,7 @@ export default function AdminDashboard({ onClose }) {
                           <div key={group.id} className="p-3.5 rounded-2xl bg-zinc-950/20 border border-zinc-900 flex items-center justify-between hover:bg-zinc-800/10 transition">
                             <div className="flex items-center gap-3 min-w-0">
                               {group.avatarUrl ? (
-                                <img src={group.avatarUrl} alt={group.name} className="h-9 w-9 rounded-full object-cover border border-zinc-800" />
+                                <img src={getAvatarUrl(group.avatarUrl)} alt={group.name} className="h-9 w-9 rounded-full object-cover border border-zinc-800" />
                               ) : (
                                 <div className="h-9 w-9 rounded-full bg-zinc-800 border border-zinc-800 flex items-center justify-center text-xs font-bold text-zinc-300">
                                   G
