@@ -25,6 +25,19 @@ function AuthScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      await loginWithGoogle();
+    } catch (err) {
+      console.error(err);
+      setError(err.message || 'Google Sign-In failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmitForm = async (e) => {
     e.preventDefault();
     if (!email) return;
@@ -44,7 +57,10 @@ function AuthScreen() {
           setLoading(false);
           return;
         }
-        await registerWithPassword(email, password, displayName.trim(), bio.trim());
+        // Send OTP code first
+        await requestOtp(email, 'register');
+        setIs2faFlow(false);
+        setStep(2);
       } else {
         // Login mode
         if (loginType === 'password') {
@@ -85,26 +101,13 @@ function AuthScreen() {
         await verify2fa(email, otp);
       } else {
         if (authMode === 'register') {
-          await verifyOtp(email, otp, displayName.trim(), bio.trim() || 'Hey there! I am using Talkzen.');
+          await registerWithPassword(email, password, displayName.trim(), bio.trim() || 'Hey there! I am using Talkzen.', otp);
         } else {
           await verifyOtp(email, otp);
         }
       }
     } catch (err) {
       setError(err.message || 'Verification failed. Try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGoogleLogin = async () => {
-    setLoading(true);
-    setError('');
-    try {
-      await loginWithGoogle();
-    } catch (err) {
-      console.error(err);
-      setError(err.message || 'Google Sign-In failed.');
     } finally {
       setLoading(false);
     }

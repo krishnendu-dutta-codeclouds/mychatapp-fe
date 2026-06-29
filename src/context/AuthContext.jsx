@@ -543,11 +543,11 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const registerWithPassword = async (email, password, displayName, bio = null) => {
+  const registerWithPassword = async (email, password, displayName, bio = null, otp = null) => {
     const response = await fetch(`${apiBase}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, displayName, bio }),
+      body: JSON.stringify({ email, password, displayName, bio, otp }),
     });
 
     const data = await handleResponse(response);
