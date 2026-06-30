@@ -486,6 +486,19 @@ export function ChatProvider({ children }) {
     }
   }, [apiFetch, loadGroups, handleResponse]);
 
+  // Leave a deleted group (for members of soft-deleted groups)
+  const leaveDeletedGroupChat = useCallback(async (groupId) => {
+    try {
+      const response = await apiFetch(`/api/chat/groups/${groupId}/leave-deleted`, { method: 'POST' });
+      if (response.ok) {
+        selectChat(null);
+        await loadGroups();
+      }
+    } catch (err) {
+      console.error('Error leaving deleted group:', err);
+    }
+  }, [loadGroups, selectChat, apiFetch]);
+
   // Edit a message via socket
   const editMessage = useCallback((messageId, newContent) => {
     if (!socket || !activeChat || !newContent.trim()) return;
@@ -912,6 +925,7 @@ export function ChatProvider({ children }) {
     createGroup: createGroupChat,
     addGroupMembers,
     leaveGroup: leaveGroupChat,
+    leaveDeletedGroup: leaveDeletedGroupChat,
     removeGroupMember,
     editMessage,
     deleteMessage,

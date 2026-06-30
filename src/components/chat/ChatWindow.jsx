@@ -29,7 +29,7 @@ function ChatWindow() {
   const { user, getAvatarUrl, apiBase, accessToken, chatBgPattern } = useAuth();
   const {
     activeChat, messages, selectChat, sendMessage, sendMediaMessage,
-    setTypingIndicator, typingStatus, leaveGroup, addGroupMembers, removeGroupMember, friends,
+    setTypingIndicator, typingStatus, leaveGroup, leaveDeletedGroup, addGroupMembers, removeGroupMember, friends,
     replyingTo, setReplyingTo, editMessage, deleteMessage, pinMessage, reactMessage,
     pinChatAction, unpinChatAction, blockUserAction, unblockUserAction,
     hideChatAction, removeFriendshipAction
@@ -268,6 +268,21 @@ function ChatWindow() {
   const handleSend = (e) => {
     e.preventDefault();
     if (!inputText.trim()) return;
+
+    // Check if user is a current member of the group (not removed)
+    if (isGroup && activeChat?.members) {
+      const isMember = activeChat.members.some(m => m.id === user.id);
+      if (!isMember) {
+        alert('You have been removed from this group and cannot send messages.');
+        return;
+      }
+    }
+
+    // Check if group is deleted by admin (soft deleted)
+    if (isGroup && activeChat?.deletedAt) {
+      alert('This group has been deleted by an admin. You can only view history.');
+      return;
+    }
 
     sendMessage(inputText.trim(), 'text');
     setInputText('');
@@ -1331,17 +1346,31 @@ function ChatWindow() {
                   </div>
 
                   <div className="pt-4 border-t border-zinc-850">
-                    <button
-                      onClick={() => {
-                        if (confirm('Are you sure you want to leave this group chat?')) {
-                          leaveGroup(activeChat.id);
-                          setShowGroupInfo(false);
-                        }
-                      }}
-                      className="w-full py-2.5 px-4 bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5"
-                    >
-                      <LogOut className="h-4 w-4" /> Leave Group Channel
-                    </button>
+                    {activeChat.deletedAt ? (
+                      <button
+                        onClick={() => {
+                          if (confirm('This group has been deleted by an admin. Do you want to leave and remove it from your chats?')) {
+                            leaveDeletedGroup(activeChat.id);
+                            setShowGroupInfo(false);
+                          }
+                        }}
+                        className="w-full py-2.5 px-4 bg-amber-500/10 border border-amber-500/20 text-amber-400 hover:bg-amber-500/20 transition rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5"
+                      >
+                        <LogOut className="h-4 w-4" /> Leave Deleted Group
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          if (confirm('Are you sure you want to leave this group chat?')) {
+                            leaveGroup(activeChat.id);
+                            setShowGroupInfo(false);
+                          }
+                        }}
+                        className="w-full py-2.5 px-4 bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5"
+                      >
+                        <LogOut className="h-4 w-4" /> Leave Group Channel
+                      </button>
+                    )}
                   </div>
                 </div>
               ) : (
