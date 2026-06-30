@@ -317,6 +317,52 @@ export function ChatProvider({ children }) {
     }
   }, [activeChat, sendMessage, apiFetch, handleResponse]);
 
+  // Forward a message to other friends or groups
+  const forwardMessage = useCallback((msgToForward, targetChats) => {
+    if (!socket || !msgToForward || !targetChats || targetChats.length === 0) return;
+
+    targetChats.forEach(target => {
+      const isGroup = !!target.groupId;
+      const chatId = isGroup ? target.id : get1to1ChatId(user.id, target.id);
+
+      const messagePayload = {
+        chatId,
+        senderId: user.id,
+        receiverId: isGroup ? null : target.id,
+        groupId: isGroup ? target.id : null,
+        content: msgToForward.content,
+        type: msgToForward.type,
+        parentMessageId: null,
+        isForwarded: true
+      };
+
+      socket.emit('send_message', messagePayload, (savedMsg) => {
+        if (savedMsg.error) {
+          console.error('Failed to forward message:', savedMsg.error);
+          return;
+        }
+
+        // If the forwarded message belongs to the currently active chat, append it to messages feed
+        const currentChatId = activeChat
+          ? (activeChat.groupId ? activeChat.id : get1to1ChatId(user.id, activeChat.id))
+          : null;
+
+        if (currentChatId === chatId) {
+          setMessages(prev => [...prev, savedMsg]);
+        }
+
+        // Update groups/friends list preview dynamically
+        if (isGroup) {
+          setGroups(prev => prev.map(g => g.id === target.id ? { ...g, lastMessage: savedMsg } : g));
+        } else {
+          setFriends(prev => prev.map(f => f.id === target.id ? { ...f, lastMessage: savedMsg } : f));
+        }
+      });
+    });
+
+    playSynthesizedChime('send');
+  }, [socket, user, activeChat, get1to1ChatId]);
+
   // Emit typing indicators
   const setTypingIndicator = useCallback((isTyping) => {
     if (!socket || !activeChat) return;
@@ -915,6 +961,7 @@ export function ChatProvider({ children }) {
     sendMessage,
     sendStatusReply,
     sendMediaMessage,
+    forwardMessage,
     setTypingIndicator,
     postStory,
     viewStory: viewStoryItem,

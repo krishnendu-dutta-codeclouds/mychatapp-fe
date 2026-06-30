@@ -430,7 +430,6 @@ function Sidebar() {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  // Filters for Chat/Friends
   const filteredFriends = friends.filter(f => 
     f.friendshipStatus === 'accepted' && 
     !f.isHidden &&
@@ -442,6 +441,12 @@ function Sidebar() {
     if (!a.isPinned && b.isPinned) return 1;
     return 0;
   });
+
+  // Filter friends for the Chats tab: only show if they have a message (conversation started) or if they are the active chat
+  const chatsFriends = filteredFriends.filter(f => 
+    f.lastMessage !== null || 
+    (activeChat && !activeChat.groupId && activeChat.id === f.id)
+  );
 
   const filteredGroups = groups.filter(g => 
     g.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -600,7 +605,7 @@ function Sidebar() {
                 );
               })}
 
-              {filteredFriends.map(friend => {
+              {chatsFriends.map(friend => {
                 const isSelected = activeChat && !activeChat.groupId && activeChat.id === friend.id;
                 const isOnline = friend.status === 'online';
                 
@@ -765,7 +770,7 @@ function Sidebar() {
                 );
               })}
 
-              {filteredFriends.length === 0 && filteredGroups.length === 0 && (
+              {chatsFriends.length === 0 && filteredGroups.length === 0 && (
                 <div className="p-8 text-center text-zinc-500 text-xs">
                   No active chats. Use the top icons to add friends or create group chats!
                 </div>
@@ -1044,7 +1049,10 @@ function Sidebar() {
                   {filteredFriends.map(friend => (
                     <div 
                       key={friend.id}
-                      onClick={() => selectChat(friend)}
+                      onClick={() => {
+                        selectChat(friend);
+                        setActiveTab('chats');
+                      }}
                       className="p-3 rounded-2xl bg-zinc-950/20 border border-zinc-900 flex items-center justify-between hover:bg-zinc-800/10 cursor-pointer transition group"
                     >
                       <div className="flex items-center gap-2.5 min-w-0 pointer-events-none select-none">
