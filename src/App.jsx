@@ -104,8 +104,8 @@ function App() {
 
   if (isAppLoading) {
     return (
-      <div 
-        className="w-screen bg-zinc-950 flex flex-col items-center justify-center"
+      <div
+        className="w-screen bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center justify-center"
         style={{ height: 'var(--viewport-height, 100dvh)' }}
       >
         {/* Beautiful animated glassmorphic loading spinner */}
@@ -132,13 +132,14 @@ function App() {
     >
       <AnimatePresence mode="wait">
         {!user ? (
-          <motion.div 
+          <motion.div
             key="auth"
-            initial={{ opacity: 0, scale: 0.95 }}
+            initial={{ opacity: 0, scale: 0.96 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.3 }}
-            className="h-full w-full flex items-center justify-center bg-zinc-950"
+            exit={{ opacity: 0, scale: 0.96 }}
+            transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+            className="h-full w-full overflow-hidden bg-zinc-50 dark:bg-zinc-950"
+            style={{ height: 'var(--viewport-height, 100dvh)' }}
           >
             <AuthScreen />
           </motion.div>

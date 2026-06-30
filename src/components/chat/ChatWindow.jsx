@@ -474,7 +474,11 @@ function ChatWindow() {
           >
             <Phone className="h-4 w-4" />
           </button>
-          <button className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800/50 rounded-xl transition">
+          <button
+            onClick={() => startCall(activeChat.id, activeChat.displayName, activeChat.avatarUrl, 'video')}
+            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800/50 rounded-xl transition"
+            title="Start Video Call"
+          >
             <Video className="h-4 w-4" />
           </button>
           {isGroup ? (

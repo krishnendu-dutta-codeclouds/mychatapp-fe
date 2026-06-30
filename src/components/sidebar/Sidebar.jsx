@@ -8,9 +8,10 @@ import {
   UserPlus, Check, X, Camera, Plus, PlusCircle, Trash2, Users2, ChevronRight, User,
   Shield, ShieldAlert, Sun, Moon, ArrowLeft, Key, Send, Palette,
   MoreVertical, Pin, PinOff, Ban, EyeOff, UserMinus,
-  Phone, PhoneCall, PhoneIncoming, PhoneOutgoing, PhoneMissed
+  Phone, PhoneCall, PhoneIncoming, PhoneOutgoing, PhoneMissed, Video
 } from 'lucide-react';
 import { useCall } from '../../context/CallContext';
+import { useSocket } from '../../context/SocketContext';
 
 const getInitials = (name) => {
   if (!name) return '?';
@@ -34,6 +35,7 @@ function Sidebar() {
   } = useChat();
 
   const { startCall, callState } = useCall();
+  const { connected: socketConnected } = useSocket();
 
   const [activeTab, setActiveTab] = useState('chats'); // 'chats', 'calls', 'friends', 'stories', 'settings'
   const [settingsSubTab, setSettingsSubTab] = useState(null); // null, 'profile', 'account'
@@ -475,9 +477,19 @@ function Sidebar() {
           </div>
           <div>
             <h1 className="text-sm font-semibold text-white leading-tight">{user?.displayName}</h1>
-            <span className="text-[11px] text-zinc-400 flex items-center gap-1">
-              <span className={`h-1.5 w-1.5 rounded-full ${isLocalBackend ? 'bg-sky-500 animate-pulse' : 'bg-emerald-500'}`}></span>
-              {isLocalBackend ? 'Local Backend' : 'Online Backend'}
+            <span className="text-[11px] flex items-center gap-1.5">
+              <span className={`relative h-2 w-2 rounded-full ${
+                socketConnected
+                  ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]'
+                  : 'bg-zinc-500'
+              }`}>
+                {socketConnected && (
+                  <span className="absolute inset-0 h-2 w-2 rounded-full bg-emerald-400 animate-ping opacity-50"></span>
+                )}
+              </span>
+              <span className={socketConnected ? 'text-emerald-400 font-medium' : 'text-zinc-500'}>
+                {socketConnected ? 'Online' : 'Offline'}
+              </span>
             </span>
           </div>
         </div>
@@ -890,20 +902,23 @@ function Sidebar() {
                       const peerName = isOutgoing ? log.receiverName : log.callerName;
                       const peerAvatar = isOutgoing ? log.receiverAvatar : log.callerAvatar;
                       const wasConnected = log.status === 'connected';
+                      const isVideoLog = log.callType === 'video';
 
                       let statusIcon = null;
                       let statusText = '';
                       
                       if (isOutgoing) {
                         statusIcon = <PhoneOutgoing className="h-3 w-3 text-sky-400" />;
-                        statusText = wasConnected ? 'Outgoing' : 'Outgoing (Cancelled)';
+                        statusText = wasConnected
+                          ? `Outgoing ${isVideoLog ? 'Video' : 'Voice'}`
+                          : `Outgoing ${isVideoLog ? 'Video' : ''} (Cancelled)`;
                       } else {
                         if (wasConnected) {
                           statusIcon = <PhoneIncoming className="h-3 w-3 text-emerald-400" />;
-                          statusText = 'Incoming';
+                          statusText = `Incoming ${isVideoLog ? 'Video' : 'Voice'}`;
                         } else {
                           statusIcon = <PhoneMissed className="h-3 w-3 text-rose-500" />;
-                          statusText = 'Missed';
+                          statusText = `Missed ${isVideoLog ? 'Video' : 'Voice'}`;
                         }
                       }
 
@@ -933,6 +948,10 @@ function Sidebar() {
                                   {getInitials(peerName)}
                                 </div>
                               )}
+                              {/* Call type badge */}
+                              <span className={`absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-md flex items-center justify-center ${isVideoLog ? 'bg-sky-500/20 text-sky-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                                {isVideoLog ? <Video className="h-2.5 w-2.5" /> : <Phone className="h-2.5 w-2.5" />}
+                              </span>
                             </div>
 
                             <div className="min-w-0">
@@ -952,11 +971,11 @@ function Sidebar() {
                           </div>
 
                           <button
-                            onClick={() => startCall(peerId, peerName, peerAvatar)}
+                            onClick={() => startCall(peerId, peerName, peerAvatar, isVideoLog ? 'video' : 'audio')}
                             className="p-2 rounded-xl text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800/80 transition duration-200 shadow-sm"
-                            title={`Call ${peerName} back`}
+                            title={`${isVideoLog ? 'Video' : 'Voice'} call ${peerName}`}
                           >
-                            <Phone className="h-4 w-4" />
+                            {isVideoLog ? <Video className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
                           </button>
                         </div>
                       );

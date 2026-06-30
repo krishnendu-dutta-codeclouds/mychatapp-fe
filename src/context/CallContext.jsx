@@ -11,6 +11,8 @@ export function CallProvider({ children }) {
   // Call States: 'idle', 'dialing' (outgoing), 'ringing' (incoming), 'connected' (active), 'ended'
   const [callState, setCallState] = useState('idle');
   const [isMuted, setIsMuted] = useState(false);
+  const [isVideoCall, setIsVideoCall] = useState(false);
+  const [isCameraOff, setIsCameraOff] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
 
   // Call participant details
@@ -22,6 +24,12 @@ export function CallProvider({ children }) {
   const localStreamRef = useRef(null);
   const remoteStreamRef = useRef(null);
   const remoteAudioRef = useRef(null);
+  const endCallRef = useRef(null);
+  const iceCandidatesQueueRef = useRef([]);
+
+  // States for binding to video elements reactively
+  const [localStream, setLocalStream] = useState(null);
+  const [remoteStream, setRemoteStream] = useState(null);
 
   // Audio tone generator states
   const audioContextRef = useRef(null);
@@ -69,6 +77,7 @@ export function CallProvider({ children }) {
   const calleeDetailsRef = useRef(null);
   const callStateRef = useRef('idle');
   const callDurationRef = useRef(0);
+  const isVideoCallRef = useRef(false);
 
   useEffect(() => {
     callerDetailsRef.current = callerDetails;
@@ -80,11 +89,16 @@ export function CallProvider({ children }) {
     callDurationRef.current = callDuration;
   }, [callDuration]);
 
+  useEffect(() => {
+    isVideoCallRef.current = isVideoCall;
+  }, [isVideoCall]);
+
   const logCallEnded = useCallback((statusOverride) => {
     const caller = callerDetailsRef.current;
     const callee = calleeDetailsRef.current;
     const state = callStateRef.current;
     const durationVal = callDurationRef.current;
+    const callType = isVideoCallRef.current ? 'video' : 'audio';
 
     // Only the call initiator should submit the log to avoid double-logging
     const isInitiator = caller?.id === user?.id;
@@ -95,7 +109,7 @@ export function CallProvider({ children }) {
       logStatus = 'connected';
     }
 
-    console.log(`📡 Logging call history: ${user.id} -> ${callee.id} (${logStatus}, duration: ${durationVal}s)`);
+    console.log(`📡 Logging ${callType} call history: ${user.id} -> ${callee.id} (${logStatus}, duration: ${durationVal}s)`);
 
     fetch(`${apiBase || ''}/api/calls`, {
       method: 'POST',
@@ -107,7 +121,8 @@ export function CallProvider({ children }) {
         callerId: user.id,
         receiverId: callee.id,
         status: logStatus,
-        duration: durationVal
+        duration: durationVal,
+        callType
       })
     }).catch(err => console.warn('⚠️ Call log failed:', err));
   }, [user, apiBase, accessToken]);
@@ -199,7 +214,7 @@ export function CallProvider({ children }) {
     console.log('🧹 Cleaning up WebRTC media and peer connection');
     stopSound();
     
-    // Stop local media track inputs
+    // Stop local media track inputs (audio + video)
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => track.stop());
       localStreamRef.current = null;
@@ -218,7 +233,26 @@ export function CallProvider({ children }) {
     }
 
     remoteStreamRef.current = null;
+    iceCandidatesQueueRef.current = [];
+    setLocalStream(null);
+    setRemoteStream(null);
     setIsMuted(false);
+    setIsCameraOff(false);
+  }, []);
+
+  const processIceQueue = useCallback(async () => {
+    const pc = peerConnectionRef.current;
+    if (!pc || !pc.remoteDescription || !pc.remoteDescription.type) return;
+    
+    console.log(`📡 Processing ${iceCandidatesQueueRef.current.length} queued remote ICE candidates...`);
+    while (iceCandidatesQueueRef.current.length > 0) {
+      const candidate = iceCandidatesQueueRef.current.shift();
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.warn('⚠️ Error adding queued remote ICE candidate:', e.message);
+      }
+    }
   }, []);
 
   // WebRTC ICE Candidate Listener
@@ -240,12 +274,46 @@ export function CallProvider({ children }) {
     pc.onicecandidate = (e) => handleIceCandidate(e, targetUserId);
 
     pc.ontrack = (e) => {
-      console.log('📡 WebRTC track received from peer. Streams count:', e.streams.length);
-      remoteStreamRef.current = e.streams[0];
+      console.log('📡 WebRTC track received from peer. Kind:', e.track.kind, 'Streams count:', e.streams.length);
+      
+      let stream = e.streams[0];
+      if (!stream) {
+        if (!remoteStreamRef.current) {
+          remoteStreamRef.current = new MediaStream();
+        }
+        remoteStreamRef.current.addTrack(e.track);
+        stream = remoteStreamRef.current;
+      } else {
+        remoteStreamRef.current = stream;
+      }
+
+      // Instantiate a new MediaStream reactively so that the video element
+      // is notified when multiple tracks (audio then video) arrive at separate times.
+      setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
+      
+      // Attach audio stream
       if (remoteAudioRef.current) {
-        remoteAudioRef.current.srcObject = e.streams[0];
+        remoteAudioRef.current.srcObject = remoteStreamRef.current;
       }
     };
+
+    // Connection state failure handler (replaces fragile socket drop check)
+    const handleConnectionFailure = () => {
+      const state = pc.connectionState || pc.iceConnectionState;
+      console.log(`📡 RTCPeerConnection State changed: ${state}`);
+      if (state === 'failed') {
+        // Wait a brief moment to check if it's a transient disconnect or absolute failure
+        setTimeout(() => {
+          if (pc.connectionState === 'failed' || pc.iceConnectionState === 'failed') {
+            console.log('📡 WebRTC peer connection failure confirmed. Ending call.');
+            if (endCallRef.current) endCallRef.current();
+          }
+        }, 3000);
+      }
+    };
+
+    pc.onconnectionstatechange = handleConnectionFailure;
+    pc.oniceconnectionstatechange = handleConnectionFailure;
 
     // Add local media tracks if stream exists
     if (localStreamRef.current) {
@@ -261,25 +329,43 @@ export function CallProvider({ children }) {
     return pc;
   }, [handleIceCandidate]);
 
-  // Start Call (Caller Action)
-  const startCall = useCallback(async (targetUserId, targetUserName, avatarUrl) => {
+  // Start Call (Caller Action) - supports both audio and video
+  const startCall = useCallback(async (targetUserId, targetUserName, avatarUrl, callType = 'audio') => {
     if (!socket || !user) {
       console.error('⚠️ Cannot start call: socket or user is undefined.', { socket: !!socket, user: !!user });
       return;
     }
     
-    console.log(`📡 Starting outbound call to ${targetUserName} (${targetUserId})`);
+    const isVideo = callType === 'video';
+    console.log(`📡 Starting outbound ${callType} call to ${targetUserName} (${targetUserId})`);
     initAudioContext();
     setCallState('dialing');
+    setIsVideoCall(isVideo);
+    setIsCameraOff(false);
     setCalleeDetails({ id: targetUserId, name: targetUserName, avatarUrl });
     setCallerDetails({ id: user.id, name: user.displayName, avatarUrl: user.avatarUrl });
 
     try {
-      // 1. Fetch Microphone stream input first
-      console.log('📡 Requesting microphone permissions...');
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // 1. Fetch media stream input (audio only, or audio + video)
+      const constraints = isVideo
+        ? { audio: true, video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } }
+        : { audio: true };
+      
+      console.log(`📡 Requesting ${isVideo ? 'camera + microphone' : 'microphone'} permissions...`);
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (err) {
+        console.warn('⚠️ getUserMedia with preferred constraints failed. Trying fallback...', err);
+        if (isVideo) {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+        } else {
+          throw err;
+        }
+      }
       localStreamRef.current = stream;
-      console.log('📡 Microphone stream obtained successfully.');
+      setLocalStream(stream);
+      console.log(`📡 Media stream obtained. Tracks: ${stream.getTracks().map(t => t.kind).join(', ')}`);
 
       // 2. Initialize Peer Connection (adds local tracks immediately)
       const pc = createPeerConnection(targetUserId);
@@ -296,12 +382,18 @@ export function CallProvider({ children }) {
         signalData: { type: offer.type, sdp: offer.sdp },
         from: user.id,
         name: user.displayName,
-        avatarUrl: user.avatarUrl
+        avatarUrl: user.avatarUrl,
+        callType
       });
     } catch (err) {
       console.error('❌ Call initialization failed:', err);
-      alert('Unable to access microphone. Please check system permissions.');
+      if (!window.isSecureContext) {
+        alert('WebRTC camera/microphone access is blocked on non-secure connections. Please serve your application over HTTPS or access it via localhost.');
+      } else {
+        alert(`Unable to access ${isVideo ? 'camera/microphone' : 'microphone'}. Please verify device permissions.`);
+      }
       setCallState('idle');
+      setIsVideoCall(false);
       cleanUpMedia();
     }
   }, [socket, user, createPeerConnection, cleanUpMedia]);
@@ -313,16 +405,38 @@ export function CallProvider({ children }) {
       return;
     }
 
-    console.log(`📡 Accepting incoming call from ${callerDetails.name} (${callerDetails.id})`);
+    const isVideo = isVideoCall;
+    console.log(`📡 Accepting incoming ${isVideo ? 'video' : 'audio'} call from ${callerDetails.name} (${callerDetails.id})`);
     initAudioContext();
     setCallState('connected');
 
     try {
-      // 1. Fetch callee microphone stream
-      console.log('📡 Requesting microphone permissions for callee...');
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // 1. Fetch callee media stream matching call type
+      const constraints = isVideo
+        ? { audio: true, video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } }
+        : { audio: true };
+
+      console.log(`📡 Requesting ${isVideo ? 'camera + microphone' : 'microphone'} permissions for callee...`);
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (err) {
+        console.warn('⚠️ Callee getUserMedia with preferred constraints failed. Trying fallback...', err);
+        if (isVideo) {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+          } catch (fallbackErr) {
+            console.warn('⚠️ Callee has no webcam/camera or blocked permission. Falling back to audio-only stream...', fallbackErr);
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            setIsCameraOff(true);
+          }
+        } else {
+          throw err;
+        }
+      }
       localStreamRef.current = stream;
-      console.log('📡 Callee microphone stream obtained.');
+      setLocalStream(stream);
+      console.log('📡 Callee media stream obtained.');
 
       // 2. Initialize callee Peer Connection
       const pc = createPeerConnection(callerDetails.id);
@@ -330,6 +444,7 @@ export function CallProvider({ children }) {
       // 3. Set remote WebRTC offer description
       console.log('📡 Setting remote SDP offer description...', callerDetails.signal?.type);
       await pc.setRemoteDescription(new RTCSessionDescription(callerDetails.signal));
+      await processIceQueue();
 
       // 4. Create callee Answer description
       console.log('📡 Creating WebRTC SDP answer...');
@@ -344,11 +459,17 @@ export function CallProvider({ children }) {
       });
     } catch (err) {
       console.error('❌ Failed to accept WebRTC session:', err);
+      if (!window.isSecureContext) {
+        alert('WebRTC camera/microphone access is blocked on non-secure connections. Please serve your application over HTTPS or access it via localhost.');
+      } else {
+        alert('Unable to access camera or microphone to answer call. Please check device permissions.');
+      }
       socket.emit('reject_call', { to: callerDetails.id });
       setCallState('idle');
+      setIsVideoCall(false);
       cleanUpMedia();
     }
-  }, [socket, callerDetails, createPeerConnection, cleanUpMedia]);
+  }, [socket, callerDetails, createPeerConnection, cleanUpMedia, isVideoCall]);
 
   // Reject Call (Callee Action)
   const rejectCall = useCallback(() => {
@@ -358,6 +479,7 @@ export function CallProvider({ children }) {
     }
     setCallState('idle');
     setCallerDetails(null);
+    setIsVideoCall(false);
     cleanUpMedia();
   }, [socket, callerDetails, cleanUpMedia]);
 
@@ -380,10 +502,16 @@ export function CallProvider({ children }) {
       setCallState('idle');
       setCallerDetails(null);
       setCalleeDetails(null);
+      setIsVideoCall(false);
     }, 1000);
     
     cleanUpMedia();
   }, [socket, callState, callerDetails, calleeDetails, cleanUpMedia, logCallEnded]);
+
+  // Keep endCallRef in sync
+  useEffect(() => {
+    endCallRef.current = endCall;
+  }, [endCall]);
 
   // Toggle audio track mute input
   const toggleMute = useCallback(() => {
@@ -393,6 +521,18 @@ export function CallProvider({ children }) {
         audioTrack.enabled = !audioTrack.enabled;
         setIsMuted(!audioTrack.enabled);
         console.log(`🎙️ Microphone mute toggled: ${!audioTrack.enabled}`);
+      }
+    }
+  }, []);
+
+  // Toggle camera on/off for video calls
+  const toggleCamera = useCallback(() => {
+    if (localStreamRef.current) {
+      const videoTrack = localStreamRef.current.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setIsCameraOff(!videoTrack.enabled);
+        console.log(`📷 Camera toggled: ${videoTrack.enabled ? 'ON' : 'OFF'}`);
       }
     }
   }, []);
@@ -407,8 +547,8 @@ export function CallProvider({ children }) {
     console.log('🔌 Registering WebRTC calling socket listeners.');
 
     // A: Inbound call setup
-    const handleIncomingCall = ({ from, name, avatarUrl, signal }) => {
-      console.log(`🔔 Inbound Call Signal received from: ${name} (${from})`);
+    const handleIncomingCall = ({ from, name, avatarUrl, signal, callType }) => {
+      console.log(`🔔 Inbound ${callType || 'audio'} Call Signal received from: ${name} (${from})`);
       
       // If busy, auto-reject call
       if (callState !== 'idle') {
@@ -417,6 +557,9 @@ export function CallProvider({ children }) {
         return;
       }
 
+      const isVideo = callType === 'video';
+      setIsVideoCall(isVideo);
+      setIsCameraOff(false);
       setCallState('ringing');
       setCallerDetails({ id: from, name, avatarUrl, signal });
       setCalleeDetails({ id: user?.id, name: user?.displayName, avatarUrl: user?.avatarUrl });
@@ -430,6 +573,7 @@ export function CallProvider({ children }) {
         try {
           await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(signal));
           console.log('📡 WebRTC peer connection remote SDP successfully set.');
+          await processIceQueue();
         } catch (e) {
           console.error('❌ Remote SDP description set failed:', e);
         }
@@ -449,6 +593,7 @@ export function CallProvider({ children }) {
         setCallState('idle');
         setCallerDetails(null);
         setCalleeDetails(null);
+        setIsVideoCall(false);
       }, 1500);
       cleanUpMedia();
     };
@@ -456,9 +601,13 @@ export function CallProvider({ children }) {
     // D: Remote Ice Candidate received
     const handleIceCandidateEvent = async ({ candidate }) => {
       try {
-        if (peerConnectionRef.current) {
+        const pc = peerConnectionRef.current;
+        if (pc && pc.remoteDescription && pc.remoteDescription.type) {
           console.log('📡 Adding remote ICE Candidate...');
-          await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } else {
+          console.log('📡 Queueing remote ICE Candidate (PC or remoteDescription not ready)...');
+          iceCandidatesQueueRef.current.push(candidate);
         }
       } catch (e) {
         console.warn('⚠️ Error adding ice candidate:', e.message);
@@ -475,6 +624,7 @@ export function CallProvider({ children }) {
         setCallState('idle');
         setCallerDetails(null);
         setCalleeDetails(null);
+        setIsVideoCall(false);
       }, 1000);
       cleanUpMedia();
     };
@@ -495,14 +645,6 @@ export function CallProvider({ children }) {
     };
   }, [socket, callState, user, cleanUpMedia, logCallEnded]);
 
-  // Disconnect call if the local socket connection drops mid-call
-  useEffect(() => {
-    if (!socketConnected && callState !== 'idle') {
-      console.log('🔌 Local socket connection dropped. Hanging up call.');
-      endCall();
-    }
-  }, [socketConnected, callState, endCall]);
-
   // Clean signal transmission if page is closed or refreshed
   useEffect(() => {
     const handleBeforeUnload = () => {
@@ -517,14 +659,19 @@ export function CallProvider({ children }) {
   const value = {
     callState,
     isMuted,
+    isVideoCall,
+    isCameraOff,
     callDuration,
     callerDetails,
     calleeDetails,
+    localStream,
+    remoteStream,
     startCall,
     acceptCall,
     rejectCall,
     endCall,
-    toggleMute
+    toggleMute,
+    toggleCamera
   };
 
   return (
