@@ -152,6 +152,15 @@ html, body, #root {
   background: rgba(255, 255, 255, 0.25);
 }
 
+/* Hide scrollbar but keep scrollability (used in group call thumbnail strip) */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* Glassmorphism Utilities */
 .glass {
   background: rgba(255, 255, 255, 0.65);

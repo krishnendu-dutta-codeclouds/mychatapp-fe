@@ -298,10 +298,14 @@ export function ChatProvider({ children }) {
   const sendMediaMessage = useCallback(async (file) => {
     if (!activeChat || !file) return;
 
-    const formData = new FormData();
-    formData.append('media', file);
-
     try {
+      // Compress image client-side if it is an image to reduce bandwidth/storage
+      const { compressImage } = await import('../utils/imageCompressor.js');
+      const optimizedFile = await compressImage(file);
+
+      const formData = new FormData();
+      formData.append('media', optimizedFile);
+
       // 1. Upload to server using apiFetch for automatic token refreshing
       const response = await apiFetch('/api/chat/media/upload', {
         method: 'POST',
@@ -380,11 +384,15 @@ export function ChatProvider({ children }) {
 
   // Post status/story
   const postStory = useCallback(async (file, caption = '') => {
-    const formData = new FormData();
-    formData.append('media', file);
-    if (caption) formData.append('caption', caption);
-
     try {
+      // Compress image client-side if it is an image to reduce bandwidth/storage
+      const { compressImage } = await import('../utils/imageCompressor.js');
+      const optimizedFile = await compressImage(file);
+
+      const formData = new FormData();
+      formData.append('media', optimizedFile);
+      if (caption) formData.append('caption', caption);
+
       const response = await apiFetch('/api/stories', {
         method: 'POST',
         body: formData

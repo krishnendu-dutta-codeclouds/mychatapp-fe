@@ -748,7 +748,11 @@ export function AuthProvider({ children }) {
     const formData = new FormData();
     if (displayName) formData.append('displayName', displayName);
     if (bio) formData.append('bio', bio);
-    if (avatarFile) formData.append('avatar', avatarFile);
+    if (avatarFile) {
+      const { compressImage } = await import('../utils/imageCompressor.js');
+      const optimizedFile = await compressImage(avatarFile);
+      formData.append('avatar', optimizedFile);
+    }
 
     const response = await apiFetch('/api/users/profile', {
       method: 'PUT',

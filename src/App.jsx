@@ -6,6 +6,7 @@ import AuthScreen from './components/auth/AuthScreen';
 import Sidebar from './components/sidebar/Sidebar';
 import ChatWindow from './components/chat/ChatWindow';
 import CallOverlay from './components/chat/CallOverlay';
+import GroupCallOverlay from './components/chat/GroupCallOverlay';
 import AdminDashboard from './components/admin/AdminDashboard';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AlertTriangle, X } from 'lucide-react';
@@ -223,6 +224,9 @@ function App() {
 
       {/* Real-time WebRTC Audio Calling Portal Overlay */}
       <CallOverlay />
+
+      {/* Group Call Overlay (mesh WebRTC) */}
+      <GroupCallOverlay />
     </div>
   );
 }

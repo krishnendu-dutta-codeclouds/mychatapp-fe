@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useChat } from '../../context/ChatContext';
 import { useCall } from '../../context/CallContext';
+import { useGroupCall } from '../../context/GroupCallContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import EmojiPicker from './EmojiPicker';
 
@@ -35,6 +36,7 @@ function ChatWindow() {
     hideChatAction, removeFriendshipAction, forwardMessage
   } = useChat();
   const { startCall } = useCall();
+  const { startGroupCall } = useGroupCall();
 
   const isGroup = activeChat ? !!activeChat.groupId : false;
 
@@ -485,20 +487,42 @@ function ChatWindow() {
 
         {/* Action icons */}
         <div className="flex items-center gap-1">
-          <button
-            onClick={() => startCall(activeChat.id, activeChat.displayName, activeChat.avatarUrl)}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800/50 rounded-xl transition"
-            title="Start Audio Call"
-          >
-            <Phone className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => startCall(activeChat.id, activeChat.displayName, activeChat.avatarUrl, 'video')}
-            className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800/50 rounded-xl transition"
-            title="Start Video Call"
-          >
-            <Video className="h-4 w-4" />
-          </button>
+          {/* Call buttons: group call for groups, 1-to-1 call for direct chats */}
+          {isGroup ? (
+            <>
+              <button
+                onClick={() => startGroupCall(activeChat, 'audio')}
+                className="p-2 text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800/50 rounded-xl transition"
+                title="Group Audio Call"
+              >
+                <Phone className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => startGroupCall(activeChat, 'video')}
+                className="p-2 text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800/50 rounded-xl transition"
+                title="Group Video Call"
+              >
+                <Video className="h-4 w-4" />
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => startCall(activeChat.id, activeChat.displayName, activeChat.avatarUrl)}
+                className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800/50 rounded-xl transition"
+                title="Start Audio Call"
+              >
+                <Phone className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => startCall(activeChat.id, activeChat.displayName, activeChat.avatarUrl, 'video')}
+                className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800/50 rounded-xl transition"
+                title="Start Video Call"
+              >
+                <Video className="h-4 w-4" />
+              </button>
+            </>
+          )}
           {isGroup ? (
             <button
               onClick={() => setShowGroupInfo(true)}
