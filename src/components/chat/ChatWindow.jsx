@@ -29,7 +29,7 @@ function ChatWindow() {
   const { user, getAvatarUrl, apiBase, accessToken, chatBgPattern } = useAuth();
   const {
     activeChat, messages, selectChat, sendMessage, sendMediaMessage,
-    setTypingIndicator, typingStatus, leaveGroup, addGroupMembers, friends,
+    setTypingIndicator, typingStatus, leaveGroup, addGroupMembers, removeGroupMember, friends,
     replyingTo, setReplyingTo, editMessage, deleteMessage, pinMessage, reactMessage,
     pinChatAction, unpinChatAction, blockUserAction, unblockUserAction,
     hideChatAction, removeFriendshipAction
@@ -1279,29 +1279,54 @@ function ChatWindow() {
                     )}
                     <h5 className="text-[10px] uppercase font-bold tracking-wider text-zinc-500 mb-3">Members ({activeChat.members?.length || 0})</h5>
                     <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-                      {activeChat.members?.map(member => (
-                        <div key={member.id} className="flex items-center justify-between py-1">
-                          <div className="flex items-center gap-2 min-w-0">
-                            {member.avatarUrl ? (
-                              <img src={getAvatarUrl(member.avatarUrl)} alt={member.displayName} className="h-7 w-7 rounded-full object-cover" />
-                            ) : (
-                              <div className="h-7 w-7 rounded-full bg-zinc-800 flex items-center justify-center text-[9px] font-bold text-zinc-300 uppercase">
-                                {getInitials(member.displayName)}
+                      {activeChat.members?.map(member => {
+                        const isCurrentUser = member.id === user.id;
+                        const isAdmin = activeChat.members?.find(m => m.id === user.id)?.role === 'admin';
+                        const canRemove = isAdmin && !isCurrentUser && member.role !== 'admin';
+                        
+                        return (
+                          <div key={member.id} className="flex items-center justify-between py-1">
+                            <div className="flex items-center gap-2 min-w-0">
+                              {member.avatarUrl ? (
+                                <img src={getAvatarUrl(member.avatarUrl)} alt={member.displayName} className="h-7 w-7 rounded-full object-cover" />
+                              ) : (
+                                <div className="h-7 w-7 rounded-full bg-zinc-800 flex items-center justify-center text-[9px] font-bold text-zinc-300 uppercase">
+                                  {getInitials(member.displayName)}
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <span className="text-xs font-semibold text-white truncate block">{member.displayName}</span>
                               </div>
-                            )}
-                            <div className="min-w-0">
-                              <span className="text-xs font-semibold text-white truncate block">{member.displayName}</span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-md ${member.role === 'admin'
+                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                : 'bg-zinc-800 text-zinc-400'
+                                }`}>
+                                {member.role}
+                              </span>
+                              {canRemove && (
+                                <button
+                                  onClick={async () => {
+                                    if (confirm(`Remove ${member.displayName} from the group?`)) {
+                                      try {
+                                        await removeGroupMember(activeChat.id, member.id);
+                                      } catch (err) {
+                                        alert(err.message || 'Failed to remove member');
+                                      }
+                                    }
+                                  }}
+                                  className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition"
+                                  title="Remove member"
+                                >
+                                  <UserMinus className="h-3.5 w-3.5" />
+                                </button>
+                              )}
                             </div>
                           </div>
-
-                          <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-md ${member.role === 'admin'
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                            : 'bg-zinc-800 text-zinc-400'
-                            }`}>
-                            {member.role}
-                          </span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
 

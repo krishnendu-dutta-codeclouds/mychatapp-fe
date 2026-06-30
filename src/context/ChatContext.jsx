@@ -463,6 +463,29 @@ export function ChatProvider({ children }) {
     }
   }, [loadGroups, selectChat, apiFetch]);
 
+  // Remove a member from a group (admin only)
+  const removeGroupMember = useCallback(async (groupId, memberId) => {
+    try {
+      const response = await apiFetch(`/api/chat/groups/${groupId}/members/${memberId}`, {
+        method: 'DELETE'
+      });
+      const data = await handleResponse(response);
+      // Update activeChat's members list in state if we're still viewing this group
+      setActiveChat(prev => {
+        if (prev && prev.id === groupId) {
+          return { ...prev, members: data.members };
+        }
+        return prev;
+      });
+      // Refresh groups to sync sidebar member counts
+      await loadGroups();
+      return data;
+    } catch (err) {
+      console.error('Error removing group member:', err);
+      throw err;
+    }
+  }, [apiFetch, loadGroups, handleResponse]);
+
   // Edit a message via socket
   const editMessage = useCallback((messageId, newContent) => {
     if (!socket || !activeChat || !newContent.trim()) return;
@@ -788,6 +811,43 @@ export function ChatProvider({ children }) {
       setMessages(prev => prev.map(m => m.id === messageId ? { ...m, reaction } : m));
     };
 
+    // Handle group members updated (when members are added/removed)
+    const handleGroupMembersUpdated = ({ groupId, members, memberCount }) => {
+      // Update the group in the groups list
+      setGroups(prev => prev.map(g => 
+        g.id === groupId ? { ...g, members, memberCount } : g
+      ));
+      
+      // Update activeChat if it's the current group
+      setActiveChat(prev => {
+        if (prev && prev.id === groupId) {
+          return { ...prev, members, memberCount };
+        }
+        return prev;
+      });
+    };
+
+    // Handle being removed from a group
+    const handleRemovedFromGroup = ({ groupId, groupName, removedBy }) => {
+      // Remove the group from the groups list
+      setGroups(prev => prev.filter(g => g.id !== groupId));
+      
+      // If this was the active chat, clear it
+      setActiveChat(prev => {
+        if (prev && prev.id === groupId) {
+          return null;
+        }
+        return prev;
+      });
+      
+      // Clear messages for this group
+      setMessages(prev => prev.filter(m => m.groupId !== groupId));
+      
+      // Show notification
+      playSynthesizedChime('group');
+      console.log(`You were removed from group: ${groupName}`);
+    };
+
     socket.on('new_message', handleNewMessage);
     socket.on('user_typing', handleUserTyping);
     socket.on('message_status_update', handleMessageStatusUpdate);
@@ -797,6 +857,8 @@ export function ChatProvider({ children }) {
     socket.on('friend_accept', handleFriendAccept);
     socket.on('friend_decline', handleFriendDecline);
     socket.on('added_to_group', handleAddedToGroup);
+    socket.on('group_members_updated', handleGroupMembersUpdated);
+    socket.on('removed_from_group', handleRemovedFromGroup);
     socket.on('message_edited', handleMessageEdited);
     socket.on('message_deleted', handleMessageDeleted);
     socket.on('message_pinned', handleMessagePinned);
@@ -817,6 +879,8 @@ export function ChatProvider({ children }) {
       socket.off('friend_accept', handleFriendAccept);
       socket.off('friend_decline', handleFriendDecline);
       socket.off('added_to_group', handleAddedToGroup);
+      socket.off('group_members_updated', handleGroupMembersUpdated);
+      socket.off('removed_from_group', handleRemovedFromGroup);
       socket.off('message_edited', handleMessageEdited);
       socket.off('message_deleted', handleMessageDeleted);
       socket.off('message_pinned', handleMessagePinned);
@@ -848,6 +912,7 @@ export function ChatProvider({ children }) {
     createGroup: createGroupChat,
     addGroupMembers,
     leaveGroup: leaveGroupChat,
+    removeGroupMember,
     editMessage,
     deleteMessage,
     pinMessage,
