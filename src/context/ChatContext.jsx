@@ -17,6 +17,11 @@ export function ChatProvider({ children }) {
   const [onlineUsers, setOnlineUsers] = useState(new Set());
   const [replyingTo, setReplyingTo] = useState(null);
   
+  const [loadingFriends, setLoadingFriends] = useState(true);
+  const [loadingGroups, setLoadingGroups] = useState(true);
+  const [loadingChat, setLoadingChat] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+  
   const playSynthesizedChime = useCallback((type) => {
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -90,9 +95,12 @@ export function ChatProvider({ children }) {
   // Load friends list
   const loadFriends = useCallback(async () => {
     if (!user) return;
+    setLoadingFriends(true);
     try {
+      console.log('[ChatContext] Loading friends...');
       const response = await apiFetch('/api/users/friends');
       const data = await handleResponse(response);
+      console.log('[ChatContext] Friends loaded:', data?.length || 0);
       setFriends(data);
       
       // Populate initial online status
@@ -106,13 +114,16 @@ export function ChatProvider({ children }) {
         return newSet;
       });
     } catch (err) {
-      console.error('Failed to load friends:', err);
+      console.error('[ChatContext] Failed to load friends:', err);
+    } finally {
+      setLoadingFriends(false);
     }
   }, [user, apiFetch, handleResponse]);
 
   // Load groups list
   const loadGroups = useCallback(async () => {
     if (!user) return;
+    setLoadingGroups(true);
     try {
       const response = await apiFetch('/api/chat/groups');
       const data = await handleResponse(response);
@@ -121,6 +132,8 @@ export function ChatProvider({ children }) {
       setGroups(mapped);
     } catch (err) {
       console.error('Failed to load groups:', err);
+    } finally {
+      setLoadingGroups(false);
     }
   }, [user, apiFetch, handleResponse]);
 
@@ -158,6 +171,7 @@ export function ChatProvider({ children }) {
 
   // Retrieve chat history when active chat changes
   const loadChatHistory = useCallback(async (chatId) => {
+    setLoadingChat(true);
     try {
       const response = await apiFetch(`/api/chat/history/${chatId}`);
       const data = await handleResponse(response);
@@ -172,6 +186,8 @@ export function ChatProvider({ children }) {
       }
     } catch (err) {
       console.error('Failed to load chat history:', err);
+    } finally {
+      setLoadingChat(false);
     }
   }, [apiFetch, socket, activeChat, handleResponse]);
 
@@ -442,17 +458,24 @@ export function ChatProvider({ children }) {
 
   // Respond to friend request
   const respondFriendRequest = useCallback(async (friendId, accept) => {
+    setActionLoading(true);
     try {
+      console.log('[ChatContext] Responding to friend request:', { friendId, accept });
       const response = await apiFetch('/api/users/friends/respond', {
         method: 'POST',
         body: JSON.stringify({ friendId, accept })
       });
       if (response.ok) {
+        console.log('[ChatContext] Friend request response OK, reloading friends...');
         await loadFriends();
         await loadStories();
+      } else {
+        console.error('[ChatContext] Friend request response failed:', response.status);
       }
     } catch (err) {
-      console.error('Error responding to friend request:', err);
+      console.error('[ChatContext] Error responding to friend request:', err);
+    } finally {
+      setActionLoading(false);
     }
   }, [loadFriends, loadStories, apiFetch]);
 
@@ -552,6 +575,49 @@ export function ChatProvider({ children }) {
       console.error('Error leaving deleted group:', err);
     }
   }, [loadGroups, selectChat, apiFetch]);
+
+  // Delete 1-to-1 chat history
+  const deleteChatHistory = useCallback(async (chatIdOrFriendId) => {
+    if (!user) return;
+    setActionLoading(true);
+    try {
+      const actualChatId = (chatIdOrFriendId.startsWith('grp_') || chatIdOrFriendId.includes(user.id))
+        ? chatIdOrFriendId
+        : get1to1ChatId(user.id, chatIdOrFriendId);
+
+      const response = await apiFetch(`/api/chat/history/${actualChatId}`, { method: 'DELETE' });
+      if (response.ok) {
+        // Clear messages for this chat
+        setMessages([]);
+        // Deselect active chat if it was the one deleted
+        const otherUserId = actualChatId.split('_').find(id => id !== user.id);
+        if (activeChat && !activeChat.groupId && activeChat.id === otherUserId) {
+          setActiveChat(null);
+        }
+        // Reload friends to update sidebar
+        await loadFriends();
+      }
+    } catch (err) {
+      console.error('Error deleting chat history:', err);
+      throw err;
+    } finally {
+      setActionLoading(false);
+    }
+  }, [user, apiFetch, get1to1ChatId, loadFriends, activeChat]);
+
+  // Delete a group (admin only)
+  const deleteGroup = useCallback(async (groupId) => {
+    try {
+      const response = await apiFetch(`/api/chat/groups/${groupId}`, { method: 'DELETE' });
+      if (response.ok) {
+        selectChat(null);
+        await loadGroups();
+      }
+    } catch (err) {
+      console.error('Error deleting group:', err);
+      throw err;
+    }
+  }, [apiFetch, loadGroups, selectChat]);
 
   // Edit a message via socket
   const editMessage = useCallback((messageId, newContent) => {
@@ -710,6 +776,7 @@ export function ChatProvider({ children }) {
 
   // Remove friendship entirely
   const removeFriendshipAction = useCallback(async (friendId) => {
+    setActionLoading(true);
     try {
       const response = await apiFetch('/api/users/friends/remove', {
         method: 'DELETE',
@@ -724,6 +791,8 @@ export function ChatProvider({ children }) {
       }
     } catch (err) {
       console.error('Error removing friendship:', err);
+    } finally {
+      setActionLoading(false);
     }
   }, [apiFetch, activeChat, selectChat]);
 
@@ -965,6 +1034,10 @@ export function ChatProvider({ children }) {
     onlineUsers,
     replyingTo,
     setReplyingTo,
+    loadingFriends,
+    loadingGroups,
+    loadingChat,
+    actionLoading,
     selectChat,
     sendMessage,
     sendStatusReply,
@@ -982,6 +1055,8 @@ export function ChatProvider({ children }) {
     leaveGroup: leaveGroupChat,
     leaveDeletedGroup: leaveDeletedGroupChat,
     removeGroupMember,
+    deleteChatHistory,
+    deleteGroup,
     editMessage,
     deleteMessage,
     pinMessage,

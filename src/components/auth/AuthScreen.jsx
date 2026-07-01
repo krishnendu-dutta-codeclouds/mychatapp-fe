@@ -28,7 +28,7 @@ function AuthScreen() {
   } = useAuth();
 
   const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
-  const [loginType, setLoginType] = useState('otp'); // 'otp' | 'password'
+  const [loginType, setLoginType] = useState('password'); // 'otp' | 'password'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -323,39 +323,6 @@ function AuthScreen() {
                   className={`space-y-3.5 ${shake ? 'input-shake' : ''}`}
                   noValidate
                 >
-                  {/* OTP / Password tab switcher */}
-                  {authMode === 'login' && (
-                    <div className="flex p-1 rounded-xl bg-zinc-200/70 dark:bg-zinc-900/60 border border-zinc-300/60 dark:border-zinc-800/60 mb-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setLoginType('otp');
-                          setError('');
-                        }}
-                        className={`flex-1 py-2 text-[11px] sm:text-xs font-bold rounded-lg transition-all duration-200 ${
-                          loginType === 'otp'
-                            ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm'
-                            : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200'
-                        }`}
-                      >
-                        OTP Code
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setLoginType('password');
-                          setError('');
-                        }}
-                        className={`flex-1 py-2 text-[11px] sm:text-xs font-bold rounded-lg transition-all duration-200 ${
-                          loginType === 'password'
-                            ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm'
-                            : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200'
-                        }`}
-                      >
-                        Password
-                      </button>
-                    </div>
-                  )}
 
                   {/* Email */}
                   <Field id="email" label="Email address" icon={<Mail className="h-4 w-4" />}>
@@ -367,7 +334,7 @@ function AuthScreen() {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="you@example.com"
-                      className="block w-full pl-10 pr-3 py-3 sm:py-3.5 bg-transparent text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 text-sm focus:outline-none focus:ring-0 border-0 font-sans"
+                      className="block w-full pl-1 pr-3 py-3 sm:py-3.5 bg-transparent text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 text-sm focus:outline-none focus:ring-0 border-0 font-sans"
                     />
                   </Field>
 
@@ -401,7 +368,7 @@ function AuthScreen() {
                             ? 'Create a strong password'
                             : 'Enter your password'
                         }
-                        className="block w-full pl-10 pr-10 py-3 sm:py-3.5 bg-transparent text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 text-sm focus:outline-none focus:ring-0 border-0 font-sans"
+                        className="block w-full pl-1 pr-10 py-3 sm:py-3.5 bg-transparent text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 text-sm focus:outline-none focus:ring-0 border-0 font-sans"
                       />
                     </Field>
                   )}
@@ -426,7 +393,7 @@ function AuthScreen() {
                             value={displayName}
                             onChange={(e) => setDisplayName(e.target.value)}
                             placeholder="Your display name"
-                            className="block w-full pl-10 pr-3 py-3 sm:py-3.5 bg-transparent text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 text-sm focus:outline-none focus:ring-0 border-0 font-sans"
+                            className="block w-full pl-1 pr-3 py-3 sm:py-3.5 bg-transparent text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 text-sm focus:outline-none focus:ring-0 border-0 font-sans"
                           />
                         </Field>
 
@@ -437,7 +404,7 @@ function AuthScreen() {
                             value={bio}
                             onChange={(e) => setBio(e.target.value)}
                             placeholder="Hey there! I am using Talkzen."
-                            className="block w-full pl-10 pr-3 py-3 sm:py-3.5 bg-transparent text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 text-sm focus:outline-none focus:ring-0 border-0 font-sans"
+                            className="block w-full pl-1 pr-3 py-3 sm:py-3.5 bg-transparent text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 text-sm focus:outline-none focus:ring-0 border-0 font-sans"
                           />
                         </Field>
                       </motion.div>

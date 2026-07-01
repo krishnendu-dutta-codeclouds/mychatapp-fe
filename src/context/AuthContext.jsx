@@ -1,4 +1,4 @@
-import React, { createContext, useState, useEffect, useContext } from 'react';
+import React, { createContext, useState, useEffect, useContext, useCallback } from 'react';
 import { signInWithPopup } from 'firebase/auth';
 import { auth, googleProvider, hasValidConfig } from '../config/firebase.js';
 import { Browser } from '@capacitor/browser';
@@ -221,7 +221,7 @@ export function AuthProvider({ children }) {
   };
 
   // Helper to safely parse JSON response and handle HTTP errors gracefully
-  const handleResponse = async (res) => {
+  const handleResponse = useCallback(async (res) => {
     const contentType = res.headers.get('content-type');
     let data;
     
@@ -243,7 +243,7 @@ export function AuthProvider({ children }) {
     }
 
     return data;
-  };
+  }, []);
 
   const toggleTheme = () => {
     const newTheme = theme === 'dark' ? 'light' : 'dark';
@@ -272,7 +272,7 @@ export function AuthProvider({ children }) {
   };
 
   // Helper for authenticated API calls
-  const apiFetch = async (url, options = {}) => {
+  const apiFetch = useCallback(async (url, options = {}) => {
     // Inject Authorization header if token exists
     // Omit Content-Type if the body is FormData so the browser automatically sets the boundary
     const headers = {
@@ -289,7 +289,9 @@ export function AuthProvider({ children }) {
       headers,
     };
 
+    console.log('[AuthContext] apiFetch:', url, options.method || 'GET');
     let response = await fetch(`${apiBase}${url}`, config);
+    console.log('[AuthContext] apiFetch response:', url, response.status);
 
     // If unauthorized (expired access token), try to refresh
     if (response.status === 401 && accessToken) {
@@ -327,7 +329,7 @@ export function AuthProvider({ children }) {
     }
 
     return response;
-  };
+  }, [accessToken, apiBase, handleResponse]);
 
   const getAvatarUrl = (url) => {
     if (!url) return null;

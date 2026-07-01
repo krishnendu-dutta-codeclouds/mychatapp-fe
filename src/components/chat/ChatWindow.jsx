@@ -33,7 +33,7 @@ function ChatWindow() {
     setTypingIndicator, typingStatus, leaveGroup, leaveDeletedGroup, addGroupMembers, removeGroupMember, friends, groups,
     replyingTo, setReplyingTo, editMessage, deleteMessage, pinMessage, reactMessage,
     pinChatAction, unpinChatAction, blockUserAction, unblockUserAction,
-    hideChatAction, removeFriendshipAction, forwardMessage
+    hideChatAction, removeFriendshipAction, forwardMessage, loadingChat
   } = useChat();
   const { startCall } = useCall();
   const { startGroupCall } = useGroupCall();
@@ -638,7 +638,31 @@ function ChatWindow() {
       {/* 3. MESSAGES SCROLL LIST */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3 chat-bg relative" data-bg-pattern={chatBgPattern}>
 
-        {messages.map((msg) => {
+        {loadingChat ? (
+          <div className="space-y-4 w-full">
+            {/* Shimmer/Skeleton Messages */}
+            <div className="flex items-start gap-2.5 animate-pulse">
+              <div className="h-8 w-8 rounded-full bg-zinc-800/60 flex-shrink-0"></div>
+              <div className="flex flex-col w-full max-w-[320px] leading-1.5 p-4 bg-zinc-800/40 rounded-e-xl rounded-es-xl">
+                <div className="h-3 w-2/3 bg-zinc-800/50 rounded-lg"></div>
+                <div className="h-2.5 w-1/2 bg-zinc-800/30 rounded-lg mt-2.5"></div>
+              </div>
+            </div>
+            <div className="flex items-start justify-end gap-2.5 animate-pulse">
+              <div className="flex flex-col w-full max-w-[320px] leading-1.5 p-4 bg-emerald-500/10 rounded-s-xl rounded-ee-xl border border-emerald-500/10">
+                <div className="h-3 w-1/2 bg-emerald-500/20 rounded-lg"></div>
+                <div className="h-2.5 w-1/3 bg-emerald-500/10 rounded-lg mt-2.5"></div>
+              </div>
+            </div>
+            <div className="flex items-start gap-2.5 animate-pulse">
+              <div className="h-8 w-8 rounded-full bg-zinc-800/60 flex-shrink-0"></div>
+              <div className="flex flex-col w-full max-w-[320px] leading-1.5 p-4 bg-zinc-800/40 rounded-e-xl rounded-es-xl">
+                <div className="h-3 w-3/4 bg-zinc-800/50 rounded-lg"></div>
+                <div className="h-2.5 w-1/3 bg-zinc-800/30 rounded-lg mt-2.5"></div>
+              </div>
+            </div>
+          </div>
+        ) : messages.map((msg) => {
           const isMe = msg.senderId === user.id;
           const isHighlighted = highlightedMessageId === msg.id;
 
