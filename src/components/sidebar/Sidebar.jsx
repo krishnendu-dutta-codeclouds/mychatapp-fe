@@ -608,7 +608,9 @@ function Sidebar() {
                         <h2 className="text-xs font-semibold text-white truncate">{group.name}</h2>
                         <p className="text-[11px] text-zinc-400 truncate mt-0.5">
                           {group.lastMessage 
-                            ? `${group.lastMessage.senderName}: ${group.lastMessage.type === 'text' ? group.lastMessage.content : `📁 [${group.lastMessage.type}]`}`
+                            ? (group.lastMessage.senderName 
+                               ? `${group.lastMessage.senderName}: ${group.lastMessage.type === 'text' ? group.lastMessage.content : `📁 [${group.lastMessage.type}]`}`
+                               : (group.lastMessage.type === 'text' ? group.lastMessage.content : `📁 [${group.lastMessage.type}]`))
                             : 'No messages yet'
                           }
                         </p>

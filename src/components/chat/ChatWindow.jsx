@@ -79,14 +79,32 @@ function ChatWindow() {
         return;
       }
 
-      // Proxy remote (Firebase Storage) or server-stored files through the backend to avoid CORS and force local folder save
+      // For /uploads/ paths and other URLs, use the download proxy endpoint which handles
+      // Firebase Storage decryption and serves with Content-Disposition: attachment
       const downloadUrl = `${apiBase}/api/chat/download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(originalFilename || '')}&token=${accessToken}`;
-      window.open(downloadUrl, '_blank');
+      
+      // Use fetch + blob for proper download behavior with correct filename
+      const response = await fetch(downloadUrl);
+      if (!response.ok) {
+        throw new Error(`Download failed: ${response.status}`);
+      }
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = originalFilename || url.split('/').pop() || 'download';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
     } catch (err) {
       console.error('Failed to download file:', err);
-      window.open(url, '_blank');
+      // Fallback: open in new tab via the decrypted serving endpoint
+      const fullUrl = url.startsWith('http') ? url : `${apiBase}${url}`;
+      window.open(fullUrl, '_blank');
     }
   };
+
 
   const scrollToMessage = (messageId) => {
     const el = messageRefs.current.get(messageId);
@@ -849,7 +867,7 @@ function ChatWindow() {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDownload(msg.content, `image_${msg.id}.png`);
+                            handleDownload(msg.content, msg.filename || `image_${msg.id}.png`);
                           }}
                           className="absolute bottom-2 right-2 p-1.5 bg-black/60 hover:bg-zinc-900/90 text-white hover:text-emerald-400 border border-zinc-850 rounded-lg backdrop-blur-sm opacity-0 group-hover/media:opacity-100 transition-opacity duration-200 shadow-lg"
                           title="Download image"
@@ -867,7 +885,7 @@ function ChatWindow() {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDownload(msg.content, `video_${msg.id}.mp4`);
+                            handleDownload(msg.content, msg.filename || `video_${msg.id}.mp4`);
                           }}
                           className="absolute top-2 right-2 p-1.5 bg-black/60 hover:bg-zinc-900/90 text-white hover:text-emerald-400 border border-zinc-850 rounded-lg backdrop-blur-sm opacity-0 group-hover/media:opacity-100 transition-opacity duration-200 shadow-lg z-10"
                           title="Download video"
@@ -886,7 +904,7 @@ function ChatWindow() {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDownload(msg.content, `audio_${msg.id}.mp3`);
+                            handleDownload(msg.content, msg.filename || `audio_${msg.id}.mp3`);
                           }}
                           className="p-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-emerald-400 border border-zinc-800 rounded-lg transition flex-shrink-0"
                           title="Download audio"
@@ -899,14 +917,16 @@ function ChatWindow() {
                     {/* E: Generic File Attachment */}
                     {msg.type === 'file' && (
                       <div
-                        onClick={() => handleDownload(msg.content, 'attachment')}
+                        onClick={() => handleDownload(msg.content, msg.filename || 'attachment')}
                         className="flex items-center justify-between gap-3 p-2.5 bg-zinc-950/40 border border-zinc-800 rounded-xl my-1 hover:bg-zinc-800/20 transition duration-200 cursor-pointer min-w-[200px]"
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
                           <FileText className="h-5 w-5 text-emerald-400 flex-shrink-0" />
                           <div className="min-w-0 text-left">
-                            <p className="text-[11px] font-semibold text-white truncate leading-tight">Attachment</p>
-                            <span className="text-[9px] text-zinc-500 block mt-0.5">Click to download</span>
+                            <p className="text-[11px] font-semibold text-white truncate leading-tight max-w-[180px]">{msg.filename || 'Attachment'}</p>
+                            <span className="text-[9px] text-zinc-500 block mt-0.5">
+                              {msg.fileSize ? `${(msg.fileSize / 1024).toFixed(1)} KB` : 'Click to download'}
+                            </span>
                           </div>
                         </div>
                         <button
@@ -1138,7 +1158,7 @@ function ChatWindow() {
             <label className="flex items-center gap-2.5 px-3 py-2 hover:bg-zinc-800 rounded-xl cursor-pointer text-xs font-semibold text-zinc-300 hover:text-white transition">
               <FileText className="h-5 w-5 text-indigo-400" />
               <span>Document</span>
-              <input type="file" accept="*" className="hidden" onChange={(e) => handleFileUpload(e, 'file')} />
+              <input type="file" accept=".pdf,.doc,.docx,.zip,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/zip,text/plain" className="hidden" onChange={(e) => handleFileUpload(e, 'file')} />
             </label>
           </motion.div>
         )}

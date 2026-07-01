@@ -227,7 +227,7 @@ export function ChatProvider({ children }) {
   }, [user, apiFetch, get1to1ChatId, loadChatHistory, handleResponse, setGroups, setFriends]);
 
   // Send a text message
-  const sendMessage = useCallback((content, type = 'text') => {
+  const sendMessage = useCallback((content, type = 'text', metadata = {}) => {
     if (!socket || !activeChat || !content.trim()) return;
 
     const isGroup = !!activeChat.groupId;
@@ -240,7 +240,9 @@ export function ChatProvider({ children }) {
       groupId: isGroup ? activeChat.id : null,
       content: content.trim(),
       type,
-      parentMessageId: replyingTo ? replyingTo.id : null
+      parentMessageId: replyingTo ? replyingTo.id : null,
+      ...(metadata.filename ? { filename: metadata.filename } : {}),
+      ...(metadata.fileSize ? { fileSize: metadata.fileSize } : {})
     };
 
     // Play send audio
@@ -330,8 +332,11 @@ export function ChatProvider({ children }) {
 
       const uploadData = await handleResponse(response);
       
-      // 2. Send media URL as a chat message
-      sendMessage(uploadData.mediaUrl, uploadData.type);
+      // 2. Send media URL as a chat message with file metadata for downloads
+      sendMessage(uploadData.mediaUrl, uploadData.type, {
+        filename: uploadData.filename || file.name,
+        fileSize: uploadData.size || file.size
+      });
     } catch (err) {
       console.error('Error sending media message:', err);
     }
