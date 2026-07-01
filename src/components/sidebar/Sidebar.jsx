@@ -103,12 +103,11 @@ function Sidebar() {
     }
   }, [callState, activeTab, loadCallHistory]);
 
-  // Reset settings sub-tab and search query when active tab changes
+  // Reset settings sub-tab when active tab changes
   useEffect(() => {
     if (activeTab !== 'settings') {
       setSettingsSubTab(null);
     }
-    setSearchQuery('');
   }, [activeTab]);
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -1037,7 +1036,7 @@ function Sidebar() {
                     const filteredLogs = callHistory.filter(log => {
                       const isOutgoing = log.callerId === user.id;
                       const peerName = isOutgoing ? log.receiverName : log.callerName;
-                      return (peerName || '').toLowerCase().includes(searchQuery.toLowerCase());
+                      return peerName?.toLowerCase().includes(searchQuery.toLowerCase());
                     });
 
                     if (filteredLogs.length === 0) {
