@@ -1,6 +1,7 @@
 import React, { createContext, useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { useAuth } from './AuthContext';
 import { useSocket } from './SocketContext';
+import { requestNotificationPermission, showNotification } from '../utils/notifications.js';
 
 const ChatContext = createContext(null);
 
@@ -154,6 +155,7 @@ export function ChatProvider({ children }) {
     if (loading) return; // Wait until backend URL resolution and token refresh are done!
 
     if (user) {
+      requestNotificationPermission();
       loadFriends();
       loadGroups();
       loadStories();
@@ -833,6 +835,35 @@ export function ChatProvider({ children }) {
         playSynthesizedChime('message');
       }
 
+      // Show browser push notification if unread or window is minimized/hidden
+      if (isUnread || document.visibilityState === 'hidden') {
+        const title = isGroup 
+          ? `${msg.senderName} (${groups.find(g => g.id === msg.groupId)?.name || 'Group'})`
+          : msg.senderName;
+        
+        let body = '';
+        if (msg.type === 'text') body = msg.content;
+        else if (msg.type === 'image') body = '📷 Image';
+        else if (msg.type === 'video') body = '🎥 Video';
+        else if (msg.type === 'audio') body = '🎵 Audio';
+        else if (msg.type === 'file') body = `📁 File: ${msg.filename || 'Attachment'}`;
+        else body = 'Attachment';
+
+        showNotification(title, {
+          body,
+          tag: msg.chatId,
+          onClick: () => {
+            if (isGroup) {
+              const grp = groups.find(g => g.id === msg.groupId);
+              if (grp) selectChat(grp);
+            } else {
+              const frnd = friends.find(f => f.id === msg.senderId);
+              if (frnd) selectChat(frnd);
+            }
+          }
+        });
+      }
+
       // Update previews in list and increment unread count if background chat
       if (isGroup) {
         setGroups(prev => prev.map(g => g.id === msg.groupId ? { 
@@ -911,12 +942,20 @@ export function ChatProvider({ children }) {
     const handleFriendRequest = ({ sender }) => {
       playSynthesizedChime('friend');
       loadFriends();
+      showNotification('New Friend Request', {
+        body: `${sender.displayName} sent you a friend request.`,
+        tag: `friend-request-${sender.id}`
+      });
     };
 
     const handleFriendAccept = ({ friend }) => {
       playSynthesizedChime('friend');
       loadFriends();
       loadStories();
+      showNotification('Friend Request Accepted', {
+        body: `${friend.displayName} accepted your friend request.`,
+        tag: `friend-accept-${friend.id}`
+      });
     };
 
     const handleFriendDecline = ({ friendId }) => {

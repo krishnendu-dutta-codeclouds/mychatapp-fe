@@ -1,6 +1,7 @@
 import React, { createContext, useState, useEffect, useRef, useContext, useCallback } from 'react';
 import { useSocket } from './SocketContext';
 import { useAuth } from './AuthContext';
+import { showNotification } from '../utils/notifications.js';
 
 const CallContext = createContext(null);
 
@@ -563,6 +564,13 @@ export function CallProvider({ children }) {
       setCallState('ringing');
       setCallerDetails({ id: from, name, avatarUrl, signal });
       setCalleeDetails({ id: user?.id, name: user?.displayName, avatarUrl: user?.avatarUrl });
+
+      // Show call push notification
+      showNotification(`Incoming ${isVideo ? 'Video' : 'Voice'} Call`, {
+        body: `${name} is calling you...`,
+        tag: `incoming-call-${from}`,
+        requireInteraction: true // Keep notification active until clicked or dismissed
+      });
     };
 
     // B: Outbound call accepted

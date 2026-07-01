@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useRef, useCallback, useEffect } from 'react';
 import { useSocket } from './SocketContext';
 import { useAuth } from './AuthContext';
+import { showNotification } from '../utils/notifications.js';
 
 const GroupCallContext = createContext(null);
 
@@ -280,9 +281,17 @@ export function GroupCallProvider({ children }) {
     const onIncomingGroupCall = ({ callId, groupId, groupName, initiatorId, initiatorName, initiatorAvatar, callType }) => {
       if (groupCallStateRef.current !== 'idle') return; // busy
       console.log(`🔔 GroupCall: Incoming from group "${groupName}" initiated by ${initiatorName}`);
-      setIsGroupVideoCall(callType === 'video');
+      const isVideo = callType === 'video';
+      setIsGroupVideoCall(isVideo);
       setGroupCallState('ringing');
       setGroupCallRoom({ callId, groupId, groupName, initiatorId, initiatorName, initiatorAvatar });
+
+      // Show group call push notification
+      showNotification('Incoming Group Call', {
+        body: `${initiatorName} is calling in group "${groupName}"...`,
+        tag: `incoming-group-call-${callId}`,
+        requireInteraction: true // Keep notification active until clicked or dismissed
+      });
     };
 
     // Server confirms we joined and tells us who is already in the room
