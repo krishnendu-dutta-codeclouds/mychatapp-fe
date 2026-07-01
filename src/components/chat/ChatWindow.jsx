@@ -327,7 +327,7 @@ function ChatWindow() {
     try {
       await sendMediaMessage(file);
     } catch (err) {
-      alert('Failed to send file.');
+      alert(`Failed to send file: ${err.message}`);
     }
   };
 

@@ -339,6 +339,7 @@ export function ChatProvider({ children }) {
       });
     } catch (err) {
       console.error('Error sending media message:', err);
+      throw err;
     }
   }, [activeChat, sendMessage, apiFetch, handleResponse]);
 
