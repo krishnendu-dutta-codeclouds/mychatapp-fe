@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useChat } from '../../context/ChatContext';
 import { useCall } from '../../context/CallContext';
@@ -33,7 +33,8 @@ function ChatWindow() {
     setTypingIndicator, typingStatus, leaveGroup, leaveDeletedGroup, addGroupMembers, removeGroupMember, friends, groups,
     replyingTo, setReplyingTo, editMessage, deleteMessage, pinMessage, reactMessage,
     pinChatAction, unpinChatAction, blockUserAction, unblockUserAction,
-    hideChatAction, removeFriendshipAction, forwardMessage, loadingChat
+    hideChatAction, removeFriendshipAction, forwardMessage, loadingChat,
+    hasMoreMessages, loadingMore, loadMoreMessages
   } = useChat();
   const { startCall } = useCall();
   const { startGroupCall } = useGroupCall();
@@ -153,11 +154,50 @@ function ChatWindow() {
 
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const chatContainerRef = useRef(null);
+  const prevScrollHeightRef = useRef(0);
+  const isFetchingMoreRef = useRef(false);
+  const lastMessageIdRef = useRef(null);
 
-  // Auto-scroll to bottom of chat
+  // Auto-scroll to bottom of chat only for new incoming/outgoing messages
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const lastMsg = messages[messages.length - 1];
+    
+    // Check if the last message is indeed new (not loaded historical page)
+    if (lastMsg.id !== lastMessageIdRef.current) {
+      lastMessageIdRef.current = lastMsg.id;
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages]);
+
+  // Scroll to bottom on typing indicator changes
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, typingStatus]);
+  }, [typingStatus]);
+
+  // Scroll listener for top-paging trigger
+  const handleScroll = (e) => {
+    const element = e.target;
+    // Trigger load when scrolled close to the top
+    if (element.scrollTop <= 15 && hasMoreMessages && !loadingMore && !isFetchingMoreRef.current) {
+      prevScrollHeightRef.current = element.scrollHeight;
+      isFetchingMoreRef.current = true;
+      loadMoreMessages().finally(() => {
+        isFetchingMoreRef.current = false;
+      });
+    }
+  };
+
+  // Keep scroll anchored when older history is prepended
+  useLayoutEffect(() => {
+    if (chatContainerRef.current && prevScrollHeightRef.current > 0) {
+      const element = chatContainerRef.current;
+      const scrollDiff = element.scrollHeight - prevScrollHeightRef.current;
+      element.scrollTop = scrollDiff;
+      prevScrollHeightRef.current = 0; // reset
+    }
+  }, [messages]);
 
   // Close mention dropdown when active chat changes
   useEffect(() => {
@@ -654,7 +694,18 @@ function ChatWindow() {
       })()}
 
       {/* 3. MESSAGES SCROLL LIST */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 chat-bg relative" data-bg-pattern={chatBgPattern}>
+      <div 
+        className="flex-1 overflow-y-auto p-4 space-y-3 chat-bg relative" 
+        data-bg-pattern={chatBgPattern}
+        ref={chatContainerRef}
+        onScroll={handleScroll}
+      >
+        {/* Loading Spinner for Pagination */}
+        {loadingMore && (
+          <div className="flex justify-center py-2">
+            <div className="h-5 w-5 rounded-full border-2 border-emerald-500/30 border-t-emerald-500 animate-spin"></div>
+          </div>
+        )}
 
         {loadingChat ? (
           <div className="space-y-4 w-full">

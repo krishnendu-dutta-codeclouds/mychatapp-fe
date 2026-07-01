@@ -13,6 +13,8 @@ export function ChatProvider({ children }) {
   const [groups, setGroups] = useState([]);
   const [activeChat, setActiveChat] = useState(null); // Either a user (friend) or group
   const [messages, setMessages] = useState([]);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [stories, setStories] = useState({ myStories: null, friendsStories: [] });
   const [typingStatus, setTypingStatus] = useState({}); // chatId -> { userId -> isTyping }
   const [onlineUsers, setOnlineUsers] = useState(new Set());
@@ -171,13 +173,16 @@ export function ChatProvider({ children }) {
     }
   }, [user, loading, loadFriends, loadGroups, loadStories]);
 
-  // Retrieve chat history when active chat changes
+  // Retrieve chat history when active chat changes (initial page load of 30 messages)
   const loadChatHistory = useCallback(async (chatId) => {
     setLoadingChat(true);
+    setHasMoreMessages(true);
     try {
-      const response = await apiFetch(`/api/chat/history/${chatId}`);
+      const limit = 30;
+      const response = await apiFetch(`/api/chat/history/${chatId}?limit=${limit}`);
       const data = await handleResponse(response);
       setMessages(data);
+      setHasMoreMessages(data.length >= limit);
 
       // Mark messages as read if they were sent by the other user
       if (socket && activeChat) {
@@ -192,6 +197,33 @@ export function ChatProvider({ children }) {
       setLoadingChat(false);
     }
   }, [apiFetch, socket, activeChat, handleResponse]);
+
+  // Load prior pages of chat history when scrolling up
+  const loadMoreMessages = useCallback(async () => {
+    if (loadingMore || !hasMoreMessages || messages.length === 0 || !activeChat) return;
+
+    const isGroup = !!activeChat.groupId;
+    const chatId = isGroup ? activeChat.id : get1to1ChatId(user.id, activeChat.id);
+    const oldestTimestamp = messages[0].createdAt;
+    const limit = 30;
+
+    setLoadingMore(true);
+    try {
+      const response = await apiFetch(`/api/chat/history/${chatId}?limit=${limit}&before=${oldestTimestamp}`);
+      const data = await handleResponse(response);
+
+      if (data && data.length > 0) {
+        setMessages(prev => [...data, ...prev]);
+        setHasMoreMessages(data.length >= limit);
+      } else {
+        setHasMoreMessages(false);
+      }
+    } catch (err) {
+      console.error('Failed to load more chat history:', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [apiFetch, activeChat, messages, loadingMore, hasMoreMessages, get1to1ChatId, user, handleResponse]);
 
   const selectChat = useCallback((chat) => {
     if (!chat) {
@@ -1082,6 +1114,9 @@ export function ChatProvider({ children }) {
     loadingFriends,
     loadingGroups,
     loadingChat,
+    hasMoreMessages,
+    loadingMore,
+    loadMoreMessages,
     actionLoading,
     selectChat,
     sendMessage,
